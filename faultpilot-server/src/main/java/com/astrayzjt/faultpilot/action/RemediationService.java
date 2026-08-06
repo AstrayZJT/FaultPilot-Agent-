@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -110,6 +111,10 @@ public class RemediationService {
 
     public PendingAction find(UUID actionId) {
         return repository.find(actionId).orElseThrow();
+    }
+
+    public List<PendingAction> findByIncident(UUID incidentId) {
+        return repository.findByIncident(incidentId);
     }
 
     public void execute(UUID actionId) {

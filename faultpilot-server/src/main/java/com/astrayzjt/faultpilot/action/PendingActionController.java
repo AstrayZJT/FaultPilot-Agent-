@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.security.Principal;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -25,6 +26,11 @@ public class PendingActionController {
     @GetMapping("/{actionId}")
     public PendingAction get(@PathVariable UUID actionId) {
         return service.find(actionId);
+    }
+
+    @GetMapping("/incident/{incidentId}")
+    public List<PendingAction> listByIncident(@PathVariable UUID incidentId) {
+        return service.findByIncident(incidentId);
     }
 
     @PostMapping("/{actionId}/confirm")
