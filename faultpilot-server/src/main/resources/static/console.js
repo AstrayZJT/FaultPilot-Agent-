@@ -32,7 +32,7 @@
       renderAction(null);
       try { $('report').textContent = JSON.stringify(await api(`/api/incidents/${incidentId}/report`), null, 2); }
       catch (_) { $('report').textContent = incident.status === 'FAILED' ? 'No diagnosis report was produced. Inspect the event stream for the failure.' : 'No diagnosis report is available yet.'; }
-      try { $('evidence').innerHTML = (await api(`/api/incidents/${incidentId}/evidence`)).map(e => `<li><b>${e.type}</b><br>${e.summary}</li>`).join(''); } catch (_) { $('evidence').innerHTML = '<li>No evidence is available.</li>'; }
+      try { $('evidence').innerHTML = (await api(`/api/incidents/${incidentId}/evidence`)).map(e => `<li><b>${escapeHtml(e.type)}</b><br><small>${escapeHtml(e.source)}</small><br>${escapeHtml(e.summary)}</li>`).join(''); } catch (_) { $('evidence').innerHTML = '<li>No evidence is available.</li>'; }
       try { renderAction((await api(`/api/pending-actions/incident/${incidentId}`))[0]); } catch (_) { renderAction(null); }
     } catch (error) { $('incident-empty').textContent = error.message; }
   };

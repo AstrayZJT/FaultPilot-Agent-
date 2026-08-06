@@ -1,5 +1,6 @@
 package com.astrayzjt.faultpilot.incident.config;
 
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
@@ -25,11 +26,46 @@ public class ServiceCatalogProperties {
             String actuatorBaseUrl,
             String databaseRef,
             List<String> downstreams,
-            List<String> allowedActions) {
+            List<String> allowedActions,
+            String arthasBaseUrl,
+            String arthasUsername,
+            String arthasPassword,
+            List<String> codePackagePrefixes) {
+
+        public ServiceDefinition(Map<String, String> prometheusLabels,
+                                 String actuatorBaseUrl,
+                                 String databaseRef,
+                                 List<String> downstreams,
+                                 List<String> allowedActions) {
+            this(prometheusLabels, actuatorBaseUrl, databaseRef, downstreams, allowedActions,
+                    null, null, null, List.of());
+        }
+
+        @ConstructorBinding
         public ServiceDefinition {
             prometheusLabels = prometheusLabels == null ? Map.of() : Map.copyOf(prometheusLabels);
             downstreams = downstreams == null ? List.of() : List.copyOf(downstreams);
             allowedActions = allowedActions == null ? List.of() : List.copyOf(allowedActions);
+            arthasBaseUrl = normalize(arthasBaseUrl);
+            arthasUsername = normalize(arthasUsername);
+            arthasPassword = normalize(arthasPassword);
+            codePackagePrefixes = codePackagePrefixes == null ? List.of() : codePackagePrefixes.stream()
+                    .map(ServiceDefinition::normalize)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .toList();
+        }
+
+        public boolean hasArthasConfiguration() {
+            return arthasBaseUrl != null && arthasUsername != null && arthasPassword != null;
+        }
+
+        public boolean hasCodePackagePrefixes() {
+            return !codePackagePrefixes.isEmpty();
+        }
+
+        private static String normalize(String value) {
+            return value == null || value.isBlank() ? null : value.trim();
         }
     }
 
@@ -41,4 +77,3 @@ public class ServiceCatalogProperties {
         return definition;
     }
 }
-

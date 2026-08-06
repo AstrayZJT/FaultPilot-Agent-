@@ -86,4 +86,4 @@ $env:FAULTPILOT_REMEDIATION_ENABLED = "false"
 mvn -pl faultpilot-server spring-boot:run
 ```
 
-In this mode FaultPilot registers only Prometheus and Actuator read-only tools. Even an incident request with `allowRemediation=true` cannot create a Pending Action or call the lab `recover-active` endpoint.
+In this mode FaultPilot registers Prometheus, Actuator, and optionally authenticated Arthas read-only tools. Configure the Arthas fields in `docs/production-integration.md` to add thread, method, and source-line evidence. Even an incident request with `allowRemediation=true` cannot create a Pending Action or call the lab `recover-active` endpoint.

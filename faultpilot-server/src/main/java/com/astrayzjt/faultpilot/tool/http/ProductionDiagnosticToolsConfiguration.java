@@ -5,6 +5,7 @@ import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
 import com.astrayzjt.faultpilot.incident.config.ServiceCatalogProperties;
 import com.astrayzjt.faultpilot.observability.ActuatorClient;
+import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
@@ -33,6 +34,13 @@ public class ProductionDiagnosticToolsConfiguration {
     ActuatorClient actuatorClient(ObservabilityProperties properties,
                                   ServiceCatalogProperties catalog) {
         return new ActuatorClient(properties, catalog);
+    }
+
+    @Bean
+    ArthasClient arthasClient(ObservabilityProperties properties,
+                              ServiceCatalogProperties catalog,
+                              com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        return new ArthasClient(properties, catalog, objectMapper);
     }
 
     @Bean
@@ -102,6 +110,39 @@ public class ProductionDiagnosticToolsConfiguration {
                             saturated ? EvidenceType.THREAD_POOL_ACTIVE_AT_MAX : EvidenceType.THREAD_POOL_NORMAL,
                             source(service, "executor"));
                 });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> queryArthasWaitingThreads(ArthasClient client) {
+        return tool("query_arthas_waiting_threads", AgentType.JVM_AGENT, (service, ignored) -> {
+            ArthasClient.ThreadInspection inspection = client.inspectWaitingThreads(service);
+            String source = "arthas:" + service + ":waiting-threads";
+            if (!inspection.configured()) {
+                return new ToolResult(true, "Arthas thread inspection is not configured for this service",
+                        Map.of("configured", false), null, source);
+            }
+            if (!inspection.codePackagePrefixesConfigured()) {
+                return new ToolResult(true, "Arthas is configured but no application code package prefixes are configured",
+                        Map.of("configured", true, "codePackagePrefixesConfigured", false), null, source);
+            }
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Arthas waiting-thread inspection is unavailable");
+            }
+            Map<String, Object> data = Map.of(
+                    "waitingThreadCount", inspection.waitingThreadCount(),
+                    "blockingThreads", inspection.blockingThreads().stream()
+                            .map(ArthasClient.BlockingThread::asEvidenceData)
+                            .toList());
+            if (inspection.blockingThreads().isEmpty()) {
+                return new ToolResult(true, "Arthas found no WAITING threads in configured application packages", data,
+                        null, source);
+            }
+            ArthasClient.BlockingThread first = inspection.blockingThreads().getFirst();
+            return new ToolResult(true,
+                    "Arthas found " + inspection.blockingThreads().size() + " WAITING application thread(s); first application location: "
+                            + first.sourceLocation() + "; blocking operation: " + first.blockingOperation(),
+                    data, EvidenceType.BLOCKING_TASK_FOUND, source);
+        });
     }
 
     @Bean

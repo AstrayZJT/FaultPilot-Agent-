@@ -50,6 +50,8 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 public class IncidentOrchestrator {
 
     private static final int MAX_ROUNDS = 2;
+    private static final int DEFAULT_AGENT_MAX_STEPS = 4;
+    private static final int JVM_AGENT_MAX_STEPS = 6;
 
     private final IncidentService incidentService;
     private final IncidentRepository incidentRepository;
@@ -214,7 +216,7 @@ public class IncidentOrchestrator {
     private CompletableFuture<AgentFinding> dispatch(AgentType type, Incident incident, int round) {
         AgentTask task = new AgentTask(UUID.randomUUID(), incident.incidentId(),
                 type.name().toLowerCase() + "-round-" + round, type,
-                "Investigate " + incident.snapshot().serviceName() + " incident", 4, round,
+                "Investigate " + incident.snapshot().serviceName() + " incident", maxSteps(type), round,
                 AgentTaskStatus.PENDING, null, null);
         taskRepository.insert(task);
         return CompletableFuture.supplyAsync(() -> {
@@ -241,5 +243,9 @@ public class IncidentOrchestrator {
     private String safeMessage(Throwable throwable) {
         String message = throwable.getMessage();
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message.substring(0, Math.min(500, message.length()));
+    }
+
+    private int maxSteps(AgentType type) {
+        return type == AgentType.JVM_AGENT ? JVM_AGENT_MAX_STEPS : DEFAULT_AGENT_MAX_STEPS;
     }
 }

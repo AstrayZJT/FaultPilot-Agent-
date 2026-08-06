@@ -109,7 +109,9 @@ public class SpecialistAgentRunner {
         String system = "You are a restricted FaultPilot specialist agent. " +
                 "Use only supplied evidence. Return JSON only with fields: status, causeCode, " +
                 "supportingEvidenceIds, counterEvidenceIds, completedChecks, missingChecks, suggestedAgent, summary. " +
-                "Do not invent evidence IDs or tools. If evidence is insufficient, use INSUFFICIENT_EVIDENCE.";
+                "Do not invent evidence IDs, tools, source locations, or remediation claims. " +
+                "When BLOCKING_TASK_FOUND is supplied, cite it when describing the observed class, method, file, line, or blocking operation. " +
+                "If evidence is insufficient, use INSUFFICIENT_EVIDENCE.";
         String user = "AgentType=" + task.agentType() + "\nTask=" + task.objective() +
                 "\nSnapshot=" + serialize(snapshot) + "\nEvidence=" + serialize(evidence) +
                 "\nToolResults=" + serialize(results);

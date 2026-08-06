@@ -59,6 +59,11 @@ faultpilot:
           - RELEASE_BLOCKED_TASKS
           - RESTORE_INDEXED_QUERY
           - RELEASE_HELD_CONNECTIONS
+        arthas-base-url: ${ORDER_SERVICE_ARTHAS_URL:}
+        arthas-username: ${ORDER_SERVICE_ARTHAS_USERNAME:}
+        arthas-password: ${ORDER_SERVICE_ARTHAS_PASSWORD:}
+        code-package-prefixes:
+          - ${ORDER_SERVICE_CODE_PACKAGE_PREFIX:}
       inventory-service:
         prometheus-labels:
           job: ${INVENTORY_SERVICE_PROMETHEUS_JOB:faultpilot-lab-inventory}
@@ -67,6 +72,11 @@ faultpilot:
         downstreams: []
         allowed-actions:
           - RESTORE_DEPENDENCY_LATENCY
+        arthas-base-url: ${INVENTORY_SERVICE_ARTHAS_URL:}
+        arthas-username: ${INVENTORY_SERVICE_ARTHAS_USERNAME:}
+        arthas-password: ${INVENTORY_SERVICE_ARTHAS_PASSWORD:}
+        code-package-prefixes:
+          - ${INVENTORY_SERVICE_CODE_PACKAGE_PREFIX:}
   model:
     base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     model-name: ${QWEN_MODEL:qwen3.7-plus}

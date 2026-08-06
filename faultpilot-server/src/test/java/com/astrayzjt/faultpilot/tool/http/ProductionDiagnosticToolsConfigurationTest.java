@@ -3,6 +3,7 @@ package com.astrayzjt.faultpilot.tool.http;
 import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
+import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
@@ -35,6 +36,26 @@ class ProductionDiagnosticToolsConfigurationTest {
         assertThat(tool.risk().name()).isEqualTo("READ_ONLY");
         assertThat(result.evidenceType()).isEqualTo(EvidenceType.PROCESS_CPU_HIGH);
         assertThat(result.data()).containsEntry("value", 0.95);
+    }
+
+    @Test
+    void mapsCuratedArthasLocationToBlockingTaskEvidence() {
+        ArthasClient client = mock(ArthasClient.class);
+        ArthasClient.BlockingThread thread = new ArthasClient.BlockingThread(31, "labBlockedExecutor-1", "WAITING",
+                "com.example.orders.OrderWorker.awaitCapacity(OrderWorker.java:88)",
+                "java.util.concurrent.CountDownLatch.await");
+        when(client.inspectWaitingThreads("order-service")).thenReturn(
+                new ArthasClient.ThreadInspection(true, true, true, 4, List.of(thread)));
+        DiagnosticTool<Map<String, Object>> tool =
+                new ProductionDiagnosticToolsConfiguration().queryArthasWaitingThreads(client);
+
+        var result = tool.execute(Map.of("command", "ognl '@java.lang.Runtime@getRuntime().exec()'"), context());
+
+        assertThat(tool.owner()).isEqualTo(AgentType.JVM_AGENT);
+        assertThat(tool.risk().name()).isEqualTo("READ_ONLY");
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.BLOCKING_TASK_FOUND);
+        assertThat(result.summary()).contains("OrderWorker.java:88");
+        assertThat(result.data()).containsEntry("waitingThreadCount", 4);
     }
 
     private ToolExecutionContext context() {

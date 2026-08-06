@@ -45,6 +45,26 @@ The order lab now:
 - Marks a scenario run `FAILED` and releases partial resources if activation throws.
 - Recovers persisted order-service active scenarios on process startup because in-memory faults cannot survive a restart.
 
+## Arthas Thread and Source-Line Tool Verification
+
+Status: AUTOMATED TESTS PASSED; live connector verification requires an authenticated Arthas instance on the target JVM.
+
+The read-only `query_arthas_waiting_threads` tool now:
+
+- Reads its endpoint, credentials, and application package prefixes only from the server-side Service Catalog.
+- Ignores model-supplied command arguments and sends only `thread --state WAITING --all`.
+- Bounds the HTTP response to 256 KiB and returns at most eight curated thread summaries.
+- Filters out JVM/framework-only stacks before producing `BLOCKING_TASK_FOUND`.
+- Preserves the application method and source location in the Evidence summary, for example `FaultScenarioManager.java:207`.
+
+Automated coverage is in `ArthasClientTest` and `ProductionDiagnosticToolsConfigurationTest`: fixed-command enforcement, Basic Auth construction, configuration fail-closed behavior, stack-frame filtering, and Evidence mapping all pass.
+
+Live production-read-only safety check:
+
+- Incident: `07123af1-423e-4338-9ca4-3fcc0146701c`.
+- The incident completed `DIAGNOSED` with `JVM_THREAD_POOL_EXHAUSTED` while Arthas was intentionally not configured.
+- The persisted tool trace contains `query_arthas_waiting_threads` with status `SUCCEEDED` and summary `Arthas thread inspection is not configured for this service`; no false source evidence was created.
+
 ## Pending Verification
 
 - CPU hotspot diagnosis in production read-only mode.
