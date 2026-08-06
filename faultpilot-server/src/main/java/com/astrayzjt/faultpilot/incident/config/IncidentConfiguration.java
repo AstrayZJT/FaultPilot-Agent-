@@ -4,7 +4,11 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties(ServiceCatalogProperties.class)
+@EnableConfigurationProperties({
+        ServiceCatalogProperties.class,
+        IntegrationProperties.class,
+        ObservabilityProperties.class,
+        RemediationProperties.class
+})
 public class IncidentConfiguration {
 }
-

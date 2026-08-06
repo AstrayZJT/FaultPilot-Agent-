@@ -73,3 +73,17 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/evaluations -Heade
 ```
 
 Each completed run reports root-cause accuracy, routing accuracy, required-evidence recall, unsafe-action rate, tool calls, agent steps, and latency.
+
+## Connect a real business service
+
+The included `faultpilot-lab-order` service is also a realistic Spring Boot target: it exposes Actuator/Micrometer metrics, Prometheus scrapes them, and FaultPilot can query those metrics in a production-style read-only mode. See `docs/production-integration.md` for the configuration and verification checklist.
+
+Start that mode with:
+
+```powershell
+$env:FAULTPILOT_INTEGRATION_MODE = "PRODUCTION_READ_ONLY"
+$env:FAULTPILOT_REMEDIATION_ENABLED = "false"
+mvn -pl faultpilot-server spring-boot:run
+```
+
+In this mode FaultPilot registers only Prometheus and Actuator read-only tools. Even an incident request with `allowRemediation=true` cannot create a Pending Action or call the lab `recover-active` endpoint.

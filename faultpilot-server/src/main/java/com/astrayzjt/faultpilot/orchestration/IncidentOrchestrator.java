@@ -189,10 +189,14 @@ public class IncidentOrchestrator {
         diagnosisRepository.save(state.incidentId(), decision);
         if (decision.status() == DiagnosisStatus.CONFIRMED) {
             Incident incident = incidentService.find(state.incidentId()).orElseThrow();
-            if (incident.snapshot().allowRemediation()) {
+            if (incident.snapshot().allowRemediation() && remediationService.isEnabled()) {
                 remediationService.prepare(state.incidentId());
             } else {
                 incidentService.updateStatus(state.incidentId(), IncidentStatus.DIAGNOSED);
+                if (incident.snapshot().allowRemediation()) {
+                    eventService.append(state.incidentId(), "ACTION_SKIPPED",
+                            Map.of("reason", "Remediation is disabled outside LAB mode"));
+                }
             }
             eventService.append(state.incidentId(), "DIAGNOSIS_COMPLETED", decision);
             return Map.of("outcome", "DIAGNOSED");

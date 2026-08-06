@@ -29,11 +29,22 @@ springdoc:
     path: /swagger-ui.html
 
 faultpilot:
+  integration:
+    mode: ${FAULTPILOT_INTEGRATION_MODE:LAB}
+  observability:
+    prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
+    timeout-seconds: ${OBSERVABILITY_TIMEOUT_SECONDS:5}
+    process-cpu-high-threshold: ${PROCESS_CPU_HIGH_THRESHOLD:0.80}
+    thread-pool-saturation-ratio: ${THREAD_POOL_SATURATION_RATIO:0.90}
+    heap-usage-high-ratio: ${HEAP_USAGE_HIGH_RATIO:0.90}
+    http-latency-high-seconds: ${HTTP_LATENCY_HIGH_SECONDS:1.0}
+  remediation:
+    enabled: ${FAULTPILOT_REMEDIATION_ENABLED:true}
   catalog:
     services:
       order-service:
         prometheus-labels:
-          application: order-service
+          job: ${ORDER_SERVICE_PROMETHEUS_JOB:faultpilot-lab-order}
         actuator-base-url: ${ORDER_SERVICE_URL:http://localhost:8081}
         database-ref: lab-postgres
         downstreams:
@@ -45,8 +56,8 @@ faultpilot:
           - RELEASE_HELD_CONNECTIONS
       inventory-service:
         prometheus-labels:
-          application: inventory-service
-        actuator-base-url: ${INVENTORY_SERVICE_URL:http://localhost:8082}
+          job: ${INVENTORY_SERVICE_PROMETHEUS_JOB:faultpilot-lab-inventory}
+        actuator-base-url: ${INVENTORY_SERVICE_URL:http://localhost:18082}
         database-ref: lab-postgres
         downstreams: []
         allowed-actions:

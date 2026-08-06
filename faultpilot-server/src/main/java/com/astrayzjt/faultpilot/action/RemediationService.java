@@ -10,6 +10,8 @@ import com.astrayzjt.faultpilot.common.domain.PendingActionStatus;
 import com.astrayzjt.faultpilot.common.domain.RiskLevel;
 import com.astrayzjt.faultpilot.diagnosis.DiagnosisRepository;
 import com.astrayzjt.faultpilot.incident.application.IncidentService;
+import com.astrayzjt.faultpilot.incident.config.IntegrationProperties;
+import com.astrayzjt.faultpilot.incident.config.RemediationProperties;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -38,21 +40,33 @@ public class RemediationService {
     private final ActionCatalog actionCatalog;
     private final IncidentEventService eventService;
     private final Executor remediationExecutor;
+    private final IntegrationProperties integrationProperties;
+    private final RemediationProperties remediationProperties;
 
     public RemediationService(IncidentService incidentService, DiagnosisRepository diagnosisRepository,
                               PendingActionRepository repository, ActionCatalog actionCatalog,
                               IncidentEventService eventService,
-                              @Qualifier("remediationExecutor") Executor remediationExecutor) {
+                              @Qualifier("remediationExecutor") Executor remediationExecutor,
+                              IntegrationProperties integrationProperties, RemediationProperties remediationProperties) {
         this.incidentService = incidentService;
         this.diagnosisRepository = diagnosisRepository;
         this.repository = repository;
         this.actionCatalog = actionCatalog;
         this.eventService = eventService;
         this.remediationExecutor = remediationExecutor;
+        this.integrationProperties = integrationProperties;
+        this.remediationProperties = remediationProperties;
+    }
+
+    public boolean isEnabled() {
+        return remediationProperties.isEnabled() && integrationProperties.isLab();
     }
 
     @Transactional
     public PendingAction prepare(UUID incidentId) {
+        if (!isEnabled()) {
+            throw new IllegalStateException("Remediation is disabled in the current integration mode");
+        }
         Incident incident = incidentService.find(incidentId).orElseThrow();
         DiagnosisDecision decision = diagnosisRepository.find(incidentId)
                 .filter(value -> value.status() == DiagnosisStatus.CONFIRMED).orElseThrow();
