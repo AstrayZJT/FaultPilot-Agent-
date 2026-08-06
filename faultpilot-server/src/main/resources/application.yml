@@ -40,6 +40,11 @@ faultpilot:
     http-latency-high-seconds: ${HTTP_LATENCY_HIGH_SECONDS:1.0}
   remediation:
     enabled: ${FAULTPILOT_REMEDIATION_ENABLED:true}
+  security:
+    viewer-password: ${FAULTPILOT_SECURITY_VIEWER_PASSWORD:}
+    operator-password: ${FAULTPILOT_SECURITY_OPERATOR_PASSWORD:}
+    admin-password: ${FAULTPILOT_SECURITY_ADMIN_PASSWORD:}
+    alertmanager-token: ${FAULTPILOT_SECURITY_ALERTMANAGER_TOKEN:}
   catalog:
     services:
       order-service:
