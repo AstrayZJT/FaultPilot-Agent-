@@ -1,5 +1,7 @@
 package com.astrayzjt.faultpilot.lab.order.fault;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,8 @@ public class FaultScenarioManager {
 
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(2);
     private static final Duration MAX_TTL = Duration.ofMinutes(5);
+    private static final int BLOCKED_POOL_SIZE = 4;
+    private static final int BLOCKED_TASK_COUNT = 24;
 
     private final JdbcTemplate jdbcTemplate;
     private final HikariDataSource dataSource;
@@ -37,25 +41,29 @@ public class FaultScenarioManager {
         return thread;
     });
     private final AtomicBoolean slowSqlEnabled = new AtomicBoolean();
-    private final ThreadPoolExecutor exhaustedPool = new ThreadPoolExecutor(
-            4, 4, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(20), r -> {
-        Thread thread = new Thread(r, "lab-blocked-worker");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ThreadPoolExecutor exhaustedPool;
     private volatile CountDownLatch blockedTasks = new CountDownLatch(1);
     private volatile CountDownLatch heldConnections = new CountDownLatch(1);
     private final List<Connection> borrowedConnections = new ArrayList<>();
 
-    public FaultScenarioManager(JdbcTemplate jdbcTemplate, HikariDataSource dataSource) {
+    public FaultScenarioManager(JdbcTemplate jdbcTemplate, HikariDataSource dataSource, MeterRegistry meterRegistry) {
         this.jdbcTemplate = jdbcTemplate;
         this.dataSource = dataSource;
+        this.exhaustedPool = new ThreadPoolExecutor(
+                BLOCKED_POOL_SIZE, BLOCKED_POOL_SIZE, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(BLOCKED_TASK_COUNT), r -> {
+            Thread thread = new Thread(r, "lab-blocked-worker");
+            thread.setDaemon(true);
+            return thread;
+        });
+        ExecutorServiceMetrics.monitor(meterRegistry, exhaustedPool, "labBlockedExecutor");
     }
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
     public void recoverStaleRuns() {
+        // A restart releases every in-memory fault, so no persisted ACTIVE run can remain actionable.
         jdbcTemplate.update("UPDATE lab_scenario_run SET status='RECOVERED', recovered_at=CURRENT_TIMESTAMP " +
-                "WHERE status='ACTIVE' AND expires_at <= CURRENT_TIMESTAMP");
+                "WHERE status='ACTIVE' AND target_service='order-service'");
     }
 
     public synchronized ScenarioRun inject(String rawCode, Long ttlSeconds, String startedBy) {
@@ -75,9 +83,17 @@ public class FaultScenarioManager {
                 run.scenarioRunId(), code.name(), run.targetService(), run.status(), java.sql.Timestamp.from(run.injectedAt()),
                 java.sql.Timestamp.from(run.expiresAt()), run.startedBy());
         ActiveFault active = new ActiveFault(run);
-        activeFaults.put(code, active);
-        activate(code, active);
-        return run;
+        try {
+            activate(code, active);
+            activeFaults.put(code, active);
+            return run;
+        } catch (RuntimeException exception) {
+            deactivate(code, active);
+            jdbcTemplate.update("UPDATE lab_scenario_run SET status='FAILED', recovered_at=CURRENT_TIMESTAMP, " +
+                            "error_message=?, version=version+1 WHERE id=?",
+                    activationFailureMessage(exception), run.scenarioRunId());
+            throw exception;
+        }
     }
 
     public synchronized ScenarioRun recover(UUID scenarioRunId) {
@@ -185,7 +201,7 @@ public class FaultScenarioManager {
 
     private void startBlockedTasks(ActiveFault active) {
         blockedTasks = new CountDownLatch(1);
-        for (int i = 0; i < 24; i++) {
+        for (int i = 0; i < BLOCKED_TASK_COUNT; i++) {
             exhaustedPool.execute(() -> {
                 try {
                     blockedTasks.await();
@@ -223,6 +239,14 @@ public class FaultScenarioManager {
     private Duration boundedTtl(Long ttlSeconds) {
         long seconds = ttlSeconds == null ? DEFAULT_TTL.toSeconds() : ttlSeconds;
         return Duration.ofSeconds(Math.max(10, Math.min(MAX_TTL.toSeconds(), seconds)));
+    }
+
+    private String activationFailureMessage(RuntimeException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return exception.getClass().getSimpleName();
+        }
+        return message.substring(0, Math.min(500, message.length()));
     }
 
     private ScenarioRun mapRun(java.sql.ResultSet rs) throws java.sql.SQLException {
