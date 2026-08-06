@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: faultpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      FAULTPILOT_APP_PASSWORD: ${FAULTPILOT_APP_PASSWORD:?Set FAULTPILOT_APP_PASSWORD in .env}
+      LAB_SERVICE_PASSWORD: ${LAB_SERVICE_PASSWORD:?Set LAB_SERVICE_PASSWORD in .env}
+      FAULTPILOT_DIAGNOSTIC_PASSWORD: ${FAULTPILOT_DIAGNOSTIC_PASSWORD:?Set FAULTPILOT_DIAGNOSTIC_PASSWORD in .env}
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+    ports:
+      - "5432:5432"
+    volumes:
+      - faultpilot-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: faultpilot-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - faultpilot-prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  faultpilot-postgres-data:
+  faultpilot-prometheus-data:
+

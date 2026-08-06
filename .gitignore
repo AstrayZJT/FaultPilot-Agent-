@@ -1,0 +1,21 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.classpath
+*.project
+*.settings/
+
+# Local runtime data and secrets
+.env
+data/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
