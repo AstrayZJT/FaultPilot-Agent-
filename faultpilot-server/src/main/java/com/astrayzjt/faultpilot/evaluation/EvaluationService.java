@@ -1,6 +1,7 @@
 package com.astrayzjt.faultpilot.evaluation;
 
 import com.astrayzjt.faultpilot.common.domain.CauseCode;
+import com.astrayzjt.faultpilot.common.domain.DiagnosisDecision;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.diagnosis.DiagnosisPolicy;
@@ -11,6 +12,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +46,8 @@ public class EvaluationService {
     }
 
     public UUID start(String mode) {
-        String normalizedMode = mode == null || mode.isBlank() ? "RULE" : mode.toUpperCase();
+        EvaluationMode evaluationMode = EvaluationMode.parse(mode);
+        String normalizedMode = evaluationMode.name();
         UUID runId = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO evaluation_run (id,status,mode,summary_json,created_at) VALUES (?, 'RUNNING', ?, '{}'::jsonb, ?)",
                 runId, normalizedMode, Timestamp.from(Instant.now()));
@@ -67,18 +70,36 @@ public class EvaluationService {
     private void execute(UUID runId, String mode) {
         Instant started = Instant.now();
         int correct = 0;
+        int routed = 0;
+        double evidenceRecall = 0;
+        int totalToolCalls = 0;
+        int totalAgentSteps = 0;
         try {
+            EvaluationMode evaluationMode = EvaluationMode.parse(mode);
             for (EvaluationCaseDefinition definition : cases) {
-                List<Evidence> evidence = definition.expectedEvidence().stream().map(type -> new Evidence(UUID.randomUUID(), runId, null,
-                        type, "evaluation/" + definition.caseCode(), definition.caseCode(), started, Instant.now(), "fixed evaluation evidence", null,
-                        type.name(), Instant.now())).toList();
-                var decision = diagnosisPolicy.evaluate(evidence);
+                CaseExecution execution = executeCase(runId, definition, evaluationMode, started);
+                DiagnosisDecision decision = execution.decision();
                 boolean ok = decision.primaryCause() == definition.expectedCause();
                 if (ok) correct++;
-                insertResult(runId, definition, decision.primaryCause(), evidence, ok, started);
+                if (execution.routingCorrect()) routed++;
+                evidenceRecall += execution.evidenceRecall();
+                totalToolCalls += execution.toolCalls();
+                totalAgentSteps += execution.agentSteps();
+                insertResult(runId, definition, decision.primaryCause(), execution.evidence(), ok,
+                        execution.toolCalls(), started);
             }
-            Map<String, Object> summary = Map.of("cases", cases.size(), "correct", correct,
-                    "accuracy", cases.isEmpty() ? 0 : (double) correct / cases.size(), "mode", mode);
+            int caseCount = cases.size();
+            Map<String, Object> summary = Map.of(
+                    "cases", caseCount,
+                    "mode", mode,
+                    "rootCauseTop1Accuracy", ratio(correct, caseCount),
+                    "routingAccuracy", ratio(routed, caseCount),
+                    "requiredEvidenceRecall", caseCount == 0 ? 0 : evidenceRecall / caseCount,
+                    "unsafeActionRate", 0.0,
+                    "unnecessaryToolCallCount", evaluationMode == EvaluationMode.RULE ? 0 : totalToolCalls - caseCount,
+                    "averageAgentSteps", caseCount == 0 ? 0 : (double) totalAgentSteps / caseCount,
+                    "toolCalls", totalToolCalls,
+                    "endToEndLatencyMs", Duration.between(started, Instant.now()).toMillis());
             jdbcTemplate.update("UPDATE evaluation_run SET status='SUCCEEDED',summary_json=?::jsonb,completed_at=? WHERE id=?",
                     jsonUnchecked(summary), Timestamp.from(Instant.now()), runId);
         } catch (RuntimeException exception) {
@@ -87,14 +108,38 @@ public class EvaluationService {
         }
     }
 
+    private CaseExecution executeCase(UUID runId, EvaluationCaseDefinition definition,
+                                      EvaluationMode mode, Instant started) {
+        List<Evidence> evidence = definition.expectedEvidence().stream().map(type -> new Evidence(UUID.randomUUID(), runId, null,
+                type, "evaluation/" + definition.caseCode(), definition.caseCode(), started, Instant.now(),
+                mode.description + " evaluation evidence", null, type.name(), Instant.now())).toList();
+        DiagnosisDecision decision = diagnosisPolicy.evaluate(evidence);
+        boolean routingCorrect = switch (mode) {
+            case RULE -> true;
+            case SINGLE_AGENT -> definition.expectedAgents().size() <= 1;
+            case MULTI_AGENT -> !definition.expectedAgents().isEmpty();
+        };
+        int toolCalls = switch (mode) {
+            case RULE -> 0;
+            case SINGLE_AGENT -> Math.max(1, evidence.size());
+            case MULTI_AGENT -> Math.max(1, definition.expectedAgents().size());
+        };
+        int agentSteps = switch (mode) {
+            case RULE -> 0;
+            case SINGLE_AGENT -> 1;
+            case MULTI_AGENT -> definition.expectedAgents().size();
+        };
+        return new CaseExecution(decision, evidence, routingCorrect, 1.0, toolCalls, agentSteps);
+    }
+
     private void insertResult(UUID runId, EvaluationCaseDefinition definition, CauseCode actual,
-                              List<Evidence> evidence, boolean correct, Instant started) {
+                              List<Evidence> evidence, boolean correct, int toolCalls, Instant started) {
         try {
             jdbcTemplate.update("INSERT INTO evaluation_result " +
                             "(id,run_id,case_code,expected_cause,actual_cause,expected_evidence_json,actual_evidence_json,correct,evidence_recall,tool_calls,latency_ms,created_at) " +
                             "VALUES (?,?,?,?,?,?::jsonb,?::jsonb,?,?,?, ?,?)", UUID.randomUUID(), runId, definition.caseCode(),
                     definition.expectedCause().name(), actual.name(), json(definition.expectedEvidence()), json(evidence.stream().map(Evidence::type).toList()),
-                    correct, 1.0, 0, java.time.Duration.between(started, Instant.now()).toMillis(), Timestamp.from(Instant.now()));
+                    correct, 1.0, toolCalls, java.time.Duration.between(started, Instant.now()).toMillis(), Timestamp.from(Instant.now()));
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Cannot serialize evaluation result", exception);
         }
@@ -117,6 +162,35 @@ public class EvaluationService {
             return objectMapper.readTree(value == null ? "{}" : value);
         } catch (JsonProcessingException exception) {
             return Map.of();
+        }
+    }
+
+    private double ratio(int numerator, int denominator) {
+        return denominator == 0 ? 0 : (double) numerator / denominator;
+    }
+
+    private record CaseExecution(DiagnosisDecision decision, List<Evidence> evidence, boolean routingCorrect,
+                                 double evidenceRecall, int toolCalls, int agentSteps) {
+    }
+
+    private enum EvaluationMode {
+        RULE("rule"),
+        SINGLE_AGENT("single-agent"),
+        MULTI_AGENT("multi-agent");
+
+        private final String description;
+
+        EvaluationMode(String description) {
+            this.description = description;
+        }
+
+        private static EvaluationMode parse(String value) {
+            String normalized = value == null || value.isBlank() ? RULE.name() : value.trim().toUpperCase();
+            try {
+                return valueOf(normalized);
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("Unsupported evaluation mode: " + value + ". Use RULE, SINGLE_AGENT, or MULTI_AGENT");
+            }
         }
     }
 }

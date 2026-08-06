@@ -40,7 +40,12 @@ public class ScenarioController {
         return manager.listRuns();
     }
 
+    @PostMapping("/scenarios/{scenarioCode}/recover-active")
+    public ResponseEntity<ScenarioRun> recoverActive(@PathVariable String scenarioCode) {
+        ScenarioRun result = manager.recoverActive(scenarioCode);
+        return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
+    }
+
     public record ScenarioRequest(Long ttlSeconds, String startedBy) {
     }
 }
-

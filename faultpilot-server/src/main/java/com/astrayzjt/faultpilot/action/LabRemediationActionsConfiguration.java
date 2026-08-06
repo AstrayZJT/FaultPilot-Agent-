@@ -3,7 +3,6 @@ package com.astrayzjt.faultpilot.action;
 import com.astrayzjt.faultpilot.common.domain.ActionCode;
 import com.astrayzjt.faultpilot.common.domain.RiskLevel;
 import com.astrayzjt.faultpilot.incident.config.ServiceCatalogProperties;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,9 +14,6 @@ import java.util.UUID;
 
 @Configuration
 public class LabRemediationActionsConfiguration {
-
-    private static final TypeReference<List<Map<String, Object>>> RUN_LIST = new TypeReference<>() {
-    };
 
     @Bean
     RemediationAction<Map<String, Object>> stopCpuFault(ServiceCatalogProperties catalog, ObjectMapper mapper) {
@@ -68,17 +64,12 @@ public class LabRemediationActionsConfiguration {
             public ActionResult execute(Map<String, Object> arguments, ActionExecutionContext context) {
                 context.throwIfExpired();
                 String baseUrl = catalog.require(service).actuatorBaseUrl();
-                List<Map<String, Object>> runs = readRuns(baseUrl, mapper);
-                Map<String, Object> active = runs.stream()
-                        .filter(run -> scenarioCode.equals(String.valueOf(run.get("scenarioCode")))
-                                && "ACTIVE".equals(String.valueOf(run.get("status"))))
-                        .findFirst().orElse(null);
-                if (active == null || active.get("scenarioRunId") == null) {
+                Map<?, ?> result = RestClient.create(baseUrl).post()
+                        .uri("/api/lab/scenarios/{scenarioCode}/recover-active", scenarioCode)
+                        .retrieve().body(Map.class);
+                if (result == null) {
                     return ActionResult.failure("No active matching lab scenario was found");
                 }
-                UUID runId = UUID.fromString(String.valueOf(active.get("scenarioRunId")));
-                Map<?, ?> result = RestClient.create(baseUrl).post()
-                        .uri("/api/lab/scenario-runs/{id}/recover", runId).retrieve().body(Map.class);
                 Map<String, Object> details = new java.util.LinkedHashMap<>();
                 if (result != null) {
                     result.forEach((key, value) -> details.put(String.valueOf(key), value));
@@ -103,12 +94,4 @@ public class LabRemediationActionsConfiguration {
         };
     }
 
-    private List<Map<String, Object>> readRuns(String baseUrl, ObjectMapper mapper) {
-        try {
-            String raw = RestClient.create(baseUrl).get().uri("/api/lab/scenario-runs").retrieve().body(String.class);
-            return mapper.readValue(raw == null ? "[]" : raw, RUN_LIST);
-        } catch (Exception exception) {
-            throw new IllegalStateException("Cannot read lab scenario runs", exception);
-        }
-    }
 }

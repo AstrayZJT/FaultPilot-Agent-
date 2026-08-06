@@ -99,9 +99,16 @@ public class FaultScenarioManager {
         return recovered;
     }
 
+    public synchronized ScenarioRun recoverActive(String rawCode) {
+        ScenarioCode code = parseCode(rawCode);
+        ActiveFault active = activeFaults.get(code);
+        return active == null ? null : recover(active.run.scenarioRunId());
+    }
+
     public List<ScenarioRun> listRuns() {
         return jdbcTemplate.query("SELECT id, scenario_code, target_service, status, injected_at, expires_at, " +
-                        "recovered_at, started_by, error_message FROM lab_scenario_run ORDER BY injected_at DESC LIMIT 50",
+                        "recovered_at, started_by, error_message FROM lab_scenario_run " +
+                        "WHERE target_service='order-service' ORDER BY injected_at DESC LIMIT 50",
                 (rs, rowNum) -> mapRun(rs));
     }
 

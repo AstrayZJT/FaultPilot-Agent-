@@ -16,6 +16,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -87,11 +89,7 @@ public class RemediationService {
         actionCatalog.require(action.actionCode());
         repository.confirm(action.id(), confirmedBy, Instant.now(), action.version());
         eventService.append(action.incidentId(), "ACTION_CONFIRMED", Map.of("actionId", action.id(), "confirmedBy", confirmedBy));
-        try {
-            remediationExecutor.execute(() -> execute(action.id()));
-        } catch (RuntimeException exception) {
-            eventService.append(action.incidentId(), "ACTION_EXECUTOR_REJECTED", Map.of("actionId", action.id()));
-        }
+        scheduleExecutionAfterCommit(action.id());
         return repository.find(action.id()).orElse(action);
     }
 
@@ -121,7 +119,9 @@ public class RemediationService {
             return;
         }
         if (action.status() == PendingActionStatus.CONFIRMED) {
-            repository.markStarted(action.id(), action.version());
+            if (!repository.markStarted(action.id(), action.version())) {
+                return;
+            }
             action = repository.find(actionId).orElseThrow();
         } else if (action.status() != PendingActionStatus.EXECUTING) {
             return;
@@ -131,6 +131,7 @@ public class RemediationService {
             ActionResult result = executeHandler(handler, action);
             if (!result.success()) {
                 repository.markResult(action.id(), PendingActionStatus.FAILED, result.details(), "HANDLER_FAILED", result.summary());
+                incidentService.updateStatus(action.incidentId(), IncidentStatus.FAILED);
                 eventService.append(action.incidentId(), "ACTION_EXECUTED", Map.of("actionId", action.id(), "status", "FAILED"));
                 return;
             }
@@ -148,7 +149,7 @@ public class RemediationService {
     public void recoverPending() {
         repository.expirePending(Instant.now());
         repository.findByStatuses(java.util.List.of(PendingActionStatus.CONFIRMED, PendingActionStatus.EXECUTING))
-                .forEach(action -> remediationExecutor.execute(() -> execute(action.id())));
+                .forEach(action -> remediationExecutor.execute(() -> executeSafely(action.id())));
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -165,6 +166,36 @@ public class RemediationService {
             case DEPENDENCY_TIMEOUT -> ActionCode.RESTORE_DEPENDENCY_LATENCY;
             case UNKNOWN -> throw new IllegalArgumentException("No remediation action for unknown cause");
         };
+    }
+
+    private void executeSafely(UUID actionId) {
+        try {
+            execute(actionId);
+        } catch (Throwable throwable) {
+            repository.markResult(actionId, PendingActionStatus.FAILED, Map.of(),
+                    throwable.getClass().getSimpleName(), safeMessage(throwable));
+        }
+    }
+
+    private void scheduleExecutionAfterCommit(UUID actionId) {
+        UUID incidentId = repository.find(actionId).map(PendingAction::incidentId).orElseThrow();
+        Runnable task = () -> {
+            try {
+                remediationExecutor.execute(() -> executeSafely(actionId));
+            } catch (RuntimeException exception) {
+                eventService.append(incidentId, "ACTION_EXECUTOR_REJECTED", Map.of("actionId", actionId));
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 
     @SuppressWarnings("unchecked")

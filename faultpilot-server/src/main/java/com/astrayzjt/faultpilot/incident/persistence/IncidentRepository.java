@@ -37,7 +37,7 @@ public class IncidentRepository {
             jdbcTemplate.update("INSERT INTO incident_run " +
                             "(id,status,service_name,symptom,alert_id,start_time,end_time,endpoint_name," +
                             "instance_name,request_id,allow_remediation,source,external_ref,raw_request_json,normalized_snapshot_json,created_at,updated_at) " +
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?)",
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)",
                     incident.incidentId(), incident.status().name(), snapshot.serviceName(), snapshot.symptom(),
                     snapshot.alertId(), Timestamp.from(snapshot.timeRange().start()), Timestamp.from(snapshot.timeRange().end()),
                     snapshot.endpointName(), snapshot.instanceName(), snapshot.requestId(), snapshot.allowRemediation(), source, externalRef, rawRequestJson,

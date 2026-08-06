@@ -4,7 +4,7 @@ FaultPilot is a Java 21 multi-agent incident diagnosis and safe remediation syst
 
 ## Current Stage
 
-Stage 0 provides the Maven multi-module skeleton, Spring Boot entrypoints, PostgreSQL/Flyway foundation, Prometheus configuration, TraceId propagation, and a common JSON error response.
+The MVP implementation covers the design stages 0-7: reproducible fault labs, read-only diagnostic tools, real Qwen-backed specialist agents, a LangGraph4j PostgreSQL checkpoint graph, evidence-based diagnosis, confirmation-gated lab remediation, evaluation records, reviewed runbook search, SSE replay, and a static operations console.
 
 Modules:
 
@@ -26,6 +26,9 @@ The application never reads a local model. Configure the real Qwen credentials t
 $env:QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 $env:QWEN_MODEL = "qwen3.7-plus"
 $env:QWEN_API_KEY = "<your-rotated-key>"
+$env:FAULTPILOT_SECURITY_VIEWER_PASSWORD = "<viewer-password>"
+$env:FAULTPILOT_SECURITY_OPERATOR_PASSWORD = "<operator-password>"
+$env:ALERTMANAGER_WEBHOOK_TOKEN = "<webhook-token>"
 ```
 
 The key is intentionally absent from the repository. Do not put it in `application.yml`, `.env.example`, logs, or commits.
@@ -53,9 +56,20 @@ Run the server locally after infrastructure is available:
 mvn -pl faultpilot-server spring-boot:run
 ```
 
+The operator console is at `http://localhost:8080/`. It uses form login, Session cookies, and CSRF. API automation can use Basic authentication after obtaining the CSRF token from `/api/security/csrf`. The server never creates an action from model text: remediation is selected by the deterministic Cause Catalog and waits at `WAITING_ACTION_CONFIRMATION`.
+
 Useful endpoints:
 
 - `http://localhost:8080/actuator/health`
 - `http://localhost:8080/api/system`
 - `http://localhost:8080/swagger-ui.html`
 - `http://localhost:9090`
+
+Run the fixed evaluation comparison with `RULE`, `SINGLE_AGENT`, or `MULTI_AGENT`:
+
+```powershell
+$headers = @{ Authorization = "Basic <base64(operator:password)>" }
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/evaluations -Headers $headers -ContentType application/json -Body '{"mode":"RULE"}'
+```
+
+Each completed run reports root-cause accuracy, routing accuracy, required-evidence recall, unsafe-action rate, tool calls, agent steps, and latency.

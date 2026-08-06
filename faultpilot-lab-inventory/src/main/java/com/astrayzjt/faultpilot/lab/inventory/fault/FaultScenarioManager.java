@@ -65,6 +65,17 @@ public class FaultScenarioManager {
         return result;
     }
 
+    public synchronized ScenarioRun recoverActive(String rawCode) {
+        ScenarioCode code;
+        try {
+            code = ScenarioCode.valueOf(rawCode.trim().toUpperCase());
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("Unsupported scenario code: " + rawCode);
+        }
+        ActiveFault active = activeFaults.get(code);
+        return active == null ? null : recover(active.run.scenarioRunId());
+    }
+
     public boolean isDependencyDelayEnabled() {
         return dependencyDelay.get();
     }

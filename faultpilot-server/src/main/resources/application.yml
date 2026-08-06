@@ -56,7 +56,7 @@ faultpilot:
     model-name: ${QWEN_MODEL:qwen3.7-plus}
     api-key: ${QWEN_API_KEY:}
     temperature: ${QWEN_TEMPERATURE:0}
-    timeout-seconds: ${QWEN_TIMEOUT_SECONDS:8}
+    timeout-seconds: ${QWEN_TIMEOUT_SECONDS:45}
 
 logging:
   pattern:

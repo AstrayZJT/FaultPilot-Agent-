@@ -88,9 +88,9 @@ public class PendingActionRepository {
         }
     }
 
-    public void markStarted(UUID id, long version) {
-        jdbcTemplate.update("UPDATE pending_action SET status='EXECUTING',started_at=?,version=version+1 WHERE id=? AND status='CONFIRMED' AND version=?",
-                Timestamp.from(Instant.now()), id, version);
+    public boolean markStarted(UUID id, long version) {
+        return jdbcTemplate.update("UPDATE pending_action SET status='EXECUTING',started_at=?,version=version+1 WHERE id=? AND status='CONFIRMED' AND version=?",
+                Timestamp.from(Instant.now()), id, version) == 1;
     }
 
     public void expirePending(Instant now) {

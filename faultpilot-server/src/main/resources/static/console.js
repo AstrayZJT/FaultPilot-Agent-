@@ -34,7 +34,15 @@
   };
   const appendEvent = (id, type, data) => { const item = document.createElement('li'); item.innerHTML = `<time>#${id}</time><code>${type}</code><span>${escapeHtml(data)}</span>`; $('events').prepend(item); };
   const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
-  $('connect').onclick = async () => { try { await api('/api/system'); setConnection(true); await render(); connectEvents(); } catch (_) { setConnection(false); } };
+  $('connect').onclick = async () => {
+    try {
+      const token = await (await fetch('/api/security/csrf', { credentials:'same-origin' })).json();
+      const body = new URLSearchParams({ username:$('username').value, password:$('password').value, _csrf:token.token });
+      const login = await fetch('/login', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/x-www-form-urlencoded', [token.headerName]:token.token}, body });
+      if (!login.ok && login.status !== 302) throw new Error('Login failed');
+      setConnection(true); await render(); connectEvents();
+    } catch (_) { setConnection(false); }
+  };
   $('refresh').onclick = render;
   $('incident-form').onsubmit = async event => { event.preventDefault(); try { const result = await api('/api/incidents', { method:'POST', headers:{'Content-Type':'application/json','X-Request-Id':crypto.randomUUID()}, body: JSON.stringify({ serviceName:$('service').value, symptom:$('symptom').value, allowRemediation:$('allow-remediation').checked }) }); incidentId=result.incidentId; localStorage.setItem('faultpilot.incidentId', incidentId); $('events').innerHTML=''; await render(); connectEvents(); } catch(error) { alert(error.message); } };
   render();
