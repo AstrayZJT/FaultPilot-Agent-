@@ -1,6 +1,15 @@
 spring:
   application:
     name: faultpilot-lab-inventory
+  datasource:
+    url: ${LAB_DB_URL:jdbc:postgresql://localhost:55432/faultpilot_lab}
+    username: ${LAB_DB_USERNAME:lab_service}
+    password: ${LAB_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${LAB_DB_MAX_POOL_SIZE:10}
+  sql:
+    init:
+      mode: always
 
 server:
   port: ${SERVER_PORT:8082}
@@ -10,4 +19,3 @@ management:
     web:
       exposure:
         include: health,info,prometheus,metrics
-
