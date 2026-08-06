@@ -27,9 +27,13 @@
       const incident = await api(`/api/incidents/${incidentId}`);
       $('incident-empty').hidden = true; $('incident-view').hidden = false;
       $('incident-id').textContent = incident.incidentId; $('incident-status').textContent = incident.status; $('incident-service').textContent = incident.snapshot.serviceName;
-      try { $('report').textContent = JSON.stringify(await api(`/api/incidents/${incidentId}/report`), null, 2); } catch (_) {}
-      try { $('evidence').innerHTML = (await api(`/api/incidents/${incidentId}/evidence`)).map(e => `<li><b>${e.type}</b><br>${e.summary}</li>`).join(''); } catch (_) {}
-      try { renderAction((await api(`/api/pending-actions/incident/${incidentId}`))[0]); } catch (_) {}
+      $('report').textContent = 'Waiting for report...';
+      $('evidence').innerHTML = '';
+      renderAction(null);
+      try { $('report').textContent = JSON.stringify(await api(`/api/incidents/${incidentId}/report`), null, 2); }
+      catch (_) { $('report').textContent = incident.status === 'FAILED' ? 'No diagnosis report was produced. Inspect the event stream for the failure.' : 'No diagnosis report is available yet.'; }
+      try { $('evidence').innerHTML = (await api(`/api/incidents/${incidentId}/evidence`)).map(e => `<li><b>${e.type}</b><br>${e.summary}</li>`).join(''); } catch (_) { $('evidence').innerHTML = '<li>No evidence is available.</li>'; }
+      try { renderAction((await api(`/api/pending-actions/incident/${incidentId}`))[0]); } catch (_) { renderAction(null); }
     } catch (error) { $('incident-empty').textContent = error.message; }
   };
   const connectEvents = () => {
@@ -39,7 +43,7 @@
     eventSource.onopen = () => setConnection(true);
     eventSource.onerror = () => setConnection(false);
     eventSource.onmessage = event => appendEvent(event.lastEventId, 'message', event.data);
-    ['INVESTIGATION_STARTED','INVESTIGATION_PLANNED','AGENTS_COMPLETED','DIAGNOSIS_COMPLETED','ACTION_PENDING','ACTION_CONFIRMED','ACTION_REJECTED','VERIFICATION_COMPLETED'].forEach(name => eventSource.addEventListener(name, event => { appendEvent(event.lastEventId, name, event.data); render(); }));
+    ['INVESTIGATION_STARTED','INVESTIGATION_PLANNED','AGENTS_COMPLETED','DIAGNOSIS_COMPLETED','DIAGNOSIS_INCONCLUSIVE','ORCHESTRATION_FAILED','ACTION_PENDING','ACTION_SKIPPED','ACTION_CONFIRMED','ACTION_REJECTED','VERIFICATION_COMPLETED'].forEach(name => eventSource.addEventListener(name, event => { appendEvent(event.lastEventId, name, event.data); render(); }));
   };
   const appendEvent = (id, type, data) => { const item = document.createElement('li'); item.innerHTML = `<time>#${id}</time><code>${type}</code><span>${escapeHtml(data)}</span>`; $('events').prepend(item); };
   const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
