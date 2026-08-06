@@ -2,7 +2,7 @@ spring:
   application:
     name: faultpilot-server
   datasource:
-    url: ${FAULTPILOT_DB_URL:jdbc:postgresql://localhost:5432/faultpilot}
+    url: ${FAULTPILOT_DB_URL:jdbc:postgresql://localhost:55432/faultpilot}
     username: ${FAULTPILOT_DB_USERNAME:faultpilot_app}
     password: ${FAULTPILOT_DB_PASSWORD:}
     hikari:

@@ -39,6 +39,8 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d
 
 The database initialization creates separate `faultpilot` and `faultpilot_lab` databases, separate service accounts, and enables `pg_stat_statements` in the lab database.
 
+The example Compose file uses host port `55432` so it does not collide with an existing local PostgreSQL instance on `5432`.
+
 ## Build and Test
 
 ```powershell
@@ -57,4 +59,3 @@ Useful endpoints:
 - `http://localhost:8080/api/system`
 - `http://localhost:8080/swagger-ui.html`
 - `http://localhost:9090`
-
