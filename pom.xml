@@ -30,6 +30,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <springdoc.version>2.8.9</springdoc.version>
         <langchain4j.version>1.17.1</langchain4j.version>
+        <langgraph4j.version>1.8.20</langgraph4j.version>
     </properties>
 
     <build>

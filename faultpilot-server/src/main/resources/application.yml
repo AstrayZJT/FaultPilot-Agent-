@@ -29,6 +29,28 @@ springdoc:
     path: /swagger-ui.html
 
 faultpilot:
+  catalog:
+    services:
+      order-service:
+        prometheus-labels:
+          application: order-service
+        actuator-base-url: ${ORDER_SERVICE_URL:http://localhost:8081}
+        database-ref: lab-postgres
+        downstreams:
+          - inventory-service
+        allowed-actions:
+          - STOP_CPU_FAULT
+          - RELEASE_BLOCKED_TASKS
+          - RESTORE_INDEXED_QUERY
+          - RELEASE_HELD_CONNECTIONS
+      inventory-service:
+        prometheus-labels:
+          application: inventory-service
+        actuator-base-url: ${INVENTORY_SERVICE_URL:http://localhost:8082}
+        database-ref: lab-postgres
+        downstreams: []
+        allowed-actions:
+          - RESTORE_DEPENDENCY_LATENCY
   model:
     base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     model-name: ${QWEN_MODEL:qwen3.7-plus}

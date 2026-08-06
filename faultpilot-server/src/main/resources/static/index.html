@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaultPilot Console</title>
+  <link rel="stylesheet" href="/console.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">OPERATIONS CONSOLE</div>
+    <h1>FaultPilot</h1>
+  </div>
+  <div class="auth">
+    <label>Operator <input id="username" value="operator" autocomplete="username"></label>
+    <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+    <button id="connect">Connect</button>
+  </div>
+</header>
+<main class="layout">
+  <section class="panel create-panel">
+    <div class="panel-heading"><h2>New investigation</h2><span id="connection" class="status">Disconnected</span></div>
+    <form id="incident-form">
+      <label>Service<select id="service"><option value="order-service">order-service</option><option value="inventory-service">inventory-service</option></select></label>
+      <label>Symptom<textarea id="symptom" required placeholder="Describe the observed failure"></textarea></label>
+      <label class="check"><input id="allow-remediation" type="checkbox"> Allow lab remediation preview</label>
+      <button type="submit">Start investigation</button>
+    </form>
+  </section>
+  <section class="panel incidents-panel">
+    <div class="panel-heading"><h2>Current incident</h2><button class="quiet" id="refresh">Refresh</button></div>
+    <div id="incident-empty" class="empty">Submit an investigation to begin.</div>
+    <div id="incident-view" hidden>
+      <div class="summary-grid"><div><span>ID</span><strong id="incident-id"></strong></div><div><span>Status</span><strong id="incident-status"></strong></div><div><span>Service</span><strong id="incident-service"></strong></div></div>
+      <div class="columns"><div><h3>Diagnosis</h3><pre id="report">Waiting for report...</pre></div><div><h3>Evidence</h3><ul id="evidence"></ul></div></div>
+      <div><h3>Pending action</h3><div id="action" class="action-box">None</div></div>
+    </div>
+  </section>
+  <section class="panel events-panel"><div class="panel-heading"><h2>Event stream</h2><span class="muted">Persisted and replayable</span></div><ol id="events" class="events"></ol></section>
+</main>
+<script src="/console.js"></script>
+</body>
+</html>
