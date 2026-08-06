@@ -47,17 +47,26 @@ The order lab now:
 
 ## Arthas Thread and Source-Line Tool Verification
 
-Status: AUTOMATED TESTS PASSED; live connector verification requires an authenticated Arthas instance on the target JVM.
+Status: PASSED (automated tests and live authenticated connector verification).
 
 The read-only `query_arthas_waiting_threads` tool now:
 
 - Reads its endpoint, credentials, and application package prefixes only from the server-side Service Catalog.
-- Ignores model-supplied command arguments and sends only `thread --state WAITING --all`.
+- Ignores model-supplied command arguments and sends only `thread --state WAITING -n 50`.
 - Bounds the HTTP response to 256 KiB and returns at most eight curated thread summaries.
 - Filters out JVM/framework-only stacks before producing `BLOCKING_TASK_FOUND`.
 - Preserves the application method and source location in the Evidence summary, for example `FaultScenarioManager.java:207`.
 
 Automated coverage is in `ArthasClientTest` and `ProductionDiagnosticToolsConfigurationTest`: fixed-command enforcement, Basic Auth construction, configuration fail-closed behavior, stack-frame filtering, and Evidence mapping all pass.
+
+Live authenticated connector check:
+
+- Arthas 4.3.2 was attached to the Order JVM on loopback with HTTP Basic Auth and mutation/instrumentation commands disabled.
+- Scenario run: `90510682-02ee-4dd0-9859-8267fdce4fd9`; observed `blockedActive=4`, `blockedQueue=20`.
+- Incident: `7f97bab5-f4e4-4beb-ac51-b5497e01ac98`.
+- Status: `DIAGNOSED`; primary cause: `JVM_THREAD_POOL_EXHAUSTED`.
+- `query_arthas_waiting_threads` completed with `SUCCEEDED` and produced `BLOCKING_TASK_FOUND` for four application threads; the first location was `FaultScenarioManager.java:207`.
+- Production read-only mode created no remediation action.
 
 Live production-read-only safety check:
 

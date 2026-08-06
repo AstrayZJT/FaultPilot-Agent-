@@ -27,7 +27,8 @@ import java.util.Set;
  */
 public class ArthasClient {
 
-    static final String WAITING_THREADS_COMMAND = "thread --state WAITING --all";
+    // Arthas --all returns only thread statistics. The bounded -n form includes stack frames.
+    static final String WAITING_THREADS_COMMAND = "thread --state WAITING -n 50";
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
     private static final int MAX_RETURNED_THREADS = 8;
     private static final int MAX_STACK_FRAMES = 16;
@@ -79,14 +80,14 @@ public class ArthasClient {
     private ThreadInspection summarize(JsonNode root, List<String> prefixes) {
         List<JsonNode> threadNodes = new ArrayList<>();
         List<JsonNode> threadInfoNodes = root.findValues("threadInfo");
+        List<JsonNode> busyThreadNodes = root.findValues("busyThreads");
         List<JsonNode> threadNodesContainers = root.findValues("threads");
-        threadInfoNodes.forEach(node -> collectThreadNodes(node, threadNodes));
-        if (threadInfoNodes.isEmpty()) {
-            threadNodesContainers.forEach(node -> collectThreadNodes(node, threadNodes));
-        }
-        if (threadInfoNodes.isEmpty() && threadNodesContainers.isEmpty()) {
+        List<JsonNode> sources = !threadInfoNodes.isEmpty() ? threadInfoNodes
+                : !busyThreadNodes.isEmpty() ? busyThreadNodes : threadNodesContainers;
+        if (sources.isEmpty()) {
             return ThreadInspection.unavailable();
         }
+        sources.forEach(node -> collectThreadNodes(node, threadNodes));
 
         int waitingThreadCount = 0;
         List<BlockingThread> blockingThreads = new ArrayList<>();

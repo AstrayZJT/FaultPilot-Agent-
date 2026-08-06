@@ -60,6 +60,24 @@ class ArthasClientTest {
         assertThat(inspection.available()).isFalse();
     }
 
+    @Test
+    void parsesArthasBusyThreadsResponseWithActualThreadFieldNames() {
+        ArthasClient client = new ArthasClient(catalog(), new ObjectMapper(), Duration.ofSeconds(1),
+                (endpoint, authorization, timeout, command) -> new ArthasHttpResponse(
+                        200, busyThreadsResponse().getBytes(StandardCharsets.UTF_8), false));
+
+        ArthasClient.ThreadInspection inspection = client.inspectWaitingThreads("order-service");
+
+        assertThat(inspection.available()).isTrue();
+        assertThat(inspection.waitingThreadCount()).isEqualTo(1);
+        assertThat(inspection.blockingThreads()).singleElement().satisfies(thread -> {
+            assertThat(thread.threadId()).isEqualTo(71);
+            assertThat(thread.threadName()).isEqualTo("lab-blocked-worker");
+            assertThat(thread.sourceLocation()).contains("FaultScenarioManager.java:207");
+            assertThat(thread.blockingOperation()).isEqualTo("java.util.concurrent.CountDownLatch.await");
+        });
+    }
+
     private ServiceCatalogProperties catalog() {
         ServiceCatalogProperties catalog = new ServiceCatalogProperties();
         catalog.setServices(Map.of("order-service", new ServiceCatalogProperties.ServiceDefinition(
@@ -92,6 +110,27 @@ class ArthasClientTest {
                         "state": "WAITING",
                         "stackTrace": [
                           {"className": "java.lang.Object", "methodName": "wait", "fileName": "Object.java", "lineNumber": 1}
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """;
+    }
+
+    private String busyThreadsResponse() {
+        return """
+                {
+                  "state": "SUCCEEDED",
+                  "body": {
+                    "busyThreads": [
+                      {
+                        "id": 71,
+                        "name": "lab-blocked-worker",
+                        "state": "WAITING",
+                        "stackTrace": [
+                          {"className": "java.util.concurrent.CountDownLatch", "methodName": "await", "fileName": "CountDownLatch.java", "lineNumber": 230},
+                          {"className": "com.astrayzjt.faultpilot.lab.order.fault.FaultScenarioManager", "methodName": "lambda$startBlockedTasks$8", "fileName": "FaultScenarioManager.java", "lineNumber": 207}
                         ]
                       }
                     ]

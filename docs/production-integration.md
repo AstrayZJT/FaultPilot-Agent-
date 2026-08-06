@@ -19,7 +19,7 @@ The model never receives a free-form PromQL or URL execution tool. FaultPilot bu
 
 ## Optional Arthas thread and source-line inspection
 
-Arthas is an optional JVM-level diagnostic source. It is attached to the already running Java process; the business service does not need a code change or a new recovery endpoint. FaultPilot sends only the fixed read-only command `thread --state WAITING --all` to the configured Arthas HTTP API. The server filters the response to configured application package prefixes and stores at most eight thread summaries. A successful match is recorded as `BLOCKING_TASK_FOUND` with the thread name, application method, source file and line number, and the observed blocking operation.
+Arthas is an optional JVM-level diagnostic source. It is attached to the already running Java process; the business service does not need a code change or a new recovery endpoint. FaultPilot sends only the fixed read-only command `thread --state WAITING -n 50` to the configured Arthas HTTP API. The bounded `-n` form is used because Arthas `--all` returns thread statistics without stack frames. The server filters the response to configured application package prefixes and stores at most eight thread summaries. A successful match is recorded as `BLOCKING_TASK_FOUND` with the thread name, application method, source file and line number, and the observed blocking operation.
 
 Configure the endpoint and package prefix before starting FaultPilot. Keep the password in the process environment and do not put it in this file or in Git:
 
