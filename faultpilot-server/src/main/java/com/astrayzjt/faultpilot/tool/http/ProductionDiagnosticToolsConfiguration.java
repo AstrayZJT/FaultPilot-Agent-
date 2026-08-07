@@ -2,6 +2,7 @@ package com.astrayzjt.faultpilot.tool.http;
 
 import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
+import com.astrayzjt.faultpilot.incident.config.DatabaseCatalogProperties;
 import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
 import com.astrayzjt.faultpilot.incident.config.RedisCatalogProperties;
 import com.astrayzjt.faultpilot.incident.config.ServiceCatalogProperties;
@@ -9,6 +10,7 @@ import com.astrayzjt.faultpilot.observability.ActuatorClient;
 import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
+import com.astrayzjt.faultpilot.observability.PostgresDiagnosticsClient;
 import com.astrayzjt.faultpilot.observability.RedisDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
@@ -50,6 +52,12 @@ public class ProductionDiagnosticToolsConfiguration {
                                                   RedisCatalogProperties redisCatalog,
                                                   ObservabilityProperties properties) {
         return new RedisDiagnosticsClient(serviceCatalog, redisCatalog, properties);
+    }
+
+    @Bean
+    PostgresDiagnosticsClient postgresDiagnosticsClient(ServiceCatalogProperties serviceCatalog,
+                                                        DatabaseCatalogProperties databaseCatalog) {
+        return new PostgresDiagnosticsClient(serviceCatalog, databaseCatalog);
     }
 
     @Bean
@@ -203,6 +211,58 @@ public class ProductionDiagnosticToolsConfiguration {
                             exhausted ? EvidenceType.DB_POOL_ACTIVE_AT_MAX : null,
                             source(service, "hikaricp"));
                 });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectPostgresSlowStatements(PostgresDiagnosticsClient client,
+                                                                        ObservabilityProperties properties) {
+        return tool("inspect_postgres_slow_statements", AgentType.DATABASE_AGENT, (service, ignored) -> {
+            PostgresDiagnosticsClient.SlowStatementInspection inspection = client.inspectSlowStatements(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No PostgreSQL diagnostic target is configured for this service",
+                        Map.of("configured", false), null, "postgres:" + service + ":pg_stat_statements");
+            }
+            String source = "postgres:" + inspection.databaseReference() + ":pg_stat_statements";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured PostgreSQL pg_stat_statements probe is unavailable");
+            }
+            List<PostgresDiagnosticsClient.SlowStatement> slowStatements = inspection.statements().stream()
+                    .filter(statement -> statement.meanDurationMillis() >= properties.getDatabaseSlowQueryThresholdMillis())
+                    .toList();
+            return new ToolResult(true,
+                    slowStatements.isEmpty() ? "PostgreSQL statement fingerprints are below the configured slow-query threshold" :
+                            "PostgreSQL pg_stat_statements contains " + slowStatements.size() + " slow statement fingerprint(s)",
+                    Map.of("databaseRef", inspection.databaseReference(),
+                            "thresholdMillis", properties.getDatabaseSlowQueryThresholdMillis(),
+                            "statements", slowStatements.stream().map(PostgresDiagnosticsClient.SlowStatement::asEvidenceData).toList()),
+                    slowStatements.isEmpty() ? null : EvidenceType.SLOW_SQL_FOUND, source);
+        });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectPostgresConnectionHolders(PostgresDiagnosticsClient client,
+                                                                           ObservabilityProperties properties) {
+        return tool("inspect_postgres_connection_holders", AgentType.DATABASE_AGENT, (service, ignored) -> {
+            PostgresDiagnosticsClient.ConnectionHolderInspection inspection = client.inspectConnectionHolders(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No PostgreSQL diagnostic target is configured for this service",
+                        Map.of("configured", false), null, "postgres:" + service + ":pg_stat_activity");
+            }
+            String source = "postgres:" + inspection.databaseReference() + ":pg_stat_activity";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured PostgreSQL pg_stat_activity probe is unavailable");
+            }
+            List<PostgresDiagnosticsClient.ConnectionHolder> holdingConnections = inspection.holders().stream()
+                    .filter(holder -> holder.longestAgeMillis() >= properties.getDatabaseHoldingQueryThresholdMillis())
+                    .toList();
+            return new ToolResult(true,
+                    holdingConnections.isEmpty() ? "PostgreSQL reports no non-idle connection above the configured holding threshold" :
+                            "PostgreSQL found " + holdingConnections.size() + " bounded connection-holder group(s)",
+                    Map.of("databaseRef", inspection.databaseReference(),
+                            "thresholdMillis", properties.getDatabaseHoldingQueryThresholdMillis(),
+                            "holders", holdingConnections.stream().map(PostgresDiagnosticsClient.ConnectionHolder::asEvidenceData).toList()),
+                    holdingConnections.isEmpty() ? null : EvidenceType.CONNECTION_HOLDING_QUERY_FOUND, source);
+        });
     }
 
     @Bean

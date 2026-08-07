@@ -15,9 +15,7 @@ CREATE DATABASE faultpilot_lab OWNER lab_service;
 \connect faultpilot_lab
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 GRANT CONNECT ON DATABASE faultpilot_lab TO faultpilot_diagnostic;
-GRANT USAGE ON SCHEMA public TO faultpilot_diagnostic;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO faultpilot_diagnostic;
-ALTER DEFAULT PRIVILEGES FOR ROLE lab_service IN SCHEMA public
-    GRANT SELECT ON TABLES TO faultpilot_diagnostic;
+GRANT pg_read_all_stats TO faultpilot_diagnostic;
+ALTER ROLE faultpilot_diagnostic SET default_transaction_read_only = on;
+ALTER ROLE faultpilot_diagnostic SET statement_timeout = '3s';
 SQL
-

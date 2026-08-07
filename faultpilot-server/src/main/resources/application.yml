@@ -42,6 +42,8 @@ faultpilot:
     redis-memory-usage-high-ratio: ${REDIS_MEMORY_USAGE_HIGH_RATIO:0.90}
     redis-evictions-high-threshold: ${REDIS_EVICTIONS_HIGH_THRESHOLD:1}
     redis-slow-command-threshold-micros: ${REDIS_SLOW_COMMAND_THRESHOLD_MICROS:10000}
+    database-slow-query-threshold-millis: ${DATABASE_SLOW_QUERY_THRESHOLD_MILLIS:1000}
+    database-holding-query-threshold-millis: ${DATABASE_HOLDING_QUERY_THRESHOLD_MILLIS:1000}
   remediation:
     enabled: ${FAULTPILOT_REMEDIATION_ENABLED:true}
   security:
@@ -92,6 +94,14 @@ faultpilot:
         tls: ${LAB_REDIS_TLS:false}
         database: ${LAB_REDIS_DATABASE:0}
         slow-log-limit: ${REDIS_SLOW_LOG_LIMIT:10}
+  database:
+    instances:
+      lab-postgres:
+        jdbc-url: ${LAB_DIAGNOSTIC_DB_URL:jdbc:postgresql://localhost:55432/faultpilot_lab}
+        username: ${LAB_DIAGNOSTIC_DB_USERNAME:faultpilot_diagnostic}
+        password: ${FAULTPILOT_DIAGNOSTIC_PASSWORD:}
+        query-timeout-seconds: ${DATABASE_DIAGNOSTIC_QUERY_TIMEOUT_SECONDS:3}
+        max-rows: ${DATABASE_DIAGNOSTIC_MAX_ROWS:20}
   model:
     base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     model-name: ${QWEN_MODEL:qwen3.7-plus}

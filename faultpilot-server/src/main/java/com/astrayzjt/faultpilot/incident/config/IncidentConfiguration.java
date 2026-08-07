@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties({
         ServiceCatalogProperties.class,
+        DatabaseCatalogProperties.class,
         RedisCatalogProperties.class,
         IntegrationProperties.class,
         ObservabilityProperties.class,

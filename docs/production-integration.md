@@ -10,7 +10,8 @@ Business service
   -> /actuator/prometheus
   -> Prometheus scrape target
   -> optional authenticated Arthas HTTP API
-  -> FaultPilot Prometheus, Actuator, and Arthas read-only tools
+  -> optional PostgreSQL statistics role
+  -> FaultPilot Prometheus, Actuator, Arthas, and PostgreSQL read-only tools
   -> Qwen Supervisor and specialist Agents
   -> Evidence-backed Diagnosis
 ```
@@ -47,6 +48,47 @@ java -jar "$env:TEMP\arthas-boot.jar" `
 After the Arthas HTTP port is listening, start FaultPilot in `PRODUCTION_READ_ONLY` mode and run the `THREAD_POOL_EXHAUSTED` scenario. The console should show `THREAD_POOL_ACTIVE_AT_MAX` plus an Arthas evidence item whose summary contains a value like `FaultScenarioManager.java:207`. A missing Arthas configuration produces no source evidence; an unreachable or unauthenticated endpoint produces `DATA_UNAVAILABLE`. Both cases prevent a model-only source claim.
 
 Stop the temporary Arthas instance after verification and never expose its HTTP or telnet ports beyond the local diagnostic network. Arthas remains read-only in FaultPilot; remediation still requires the existing human-confirmation workflow and is disabled in production-read-only mode.
+
+## PostgreSQL statistics diagnostics
+
+FaultPilot can inspect PostgreSQL execution statistics and active connection groups through a separate diagnostic account. It does not connect through the business application's datasource and it never accepts SQL text, parameters, database names, or connection URLs from the model.
+
+The two fixed probes are:
+
+- `inspect_postgres_slow_statements`: reads `pg_stat_statements` and returns only a normalized statement fingerprint, call count, mean duration, and maximum duration. It never selects the SQL text.
+- `inspect_postgres_connection_holders`: reads grouped `pg_stat_activity` state and wait-event metadata. It never selects a query, bind value, PID, database user, or application name.
+
+Create a dedicated role with no write grants. The database administrator should adapt these statements to the organization's role policy and store the password in a secret manager rather than in a shell history or repository:
+
+```sql
+CREATE ROLE faultpilot_diagnostic LOGIN PASSWORD '<secret-from-secret-manager>';
+GRANT CONNECT ON DATABASE orders TO faultpilot_diagnostic;
+GRANT pg_read_all_stats TO faultpilot_diagnostic;
+ALTER ROLE faultpilot_diagnostic SET default_transaction_read_only = on;
+ALTER ROLE faultpilot_diagnostic SET statement_timeout = '3s';
+```
+
+`pg_stat_statements` must be enabled by the database administrator. PostgreSQL normally requires `shared_preload_libraries = 'pg_stat_statements'`, a restart, and `CREATE EXTENSION pg_stat_statements` in each monitored database. Keep the role free of table `SELECT`, DDL, replication, and superuser privileges; the fixed probes do not need them.
+
+Add the PostgreSQL target to FaultPilot's administrator-owned catalog. The JDBC URL must be credential-free, query timeout is restricted to 1-10 seconds, and result count is restricted to 1-50 rows:
+
+```yaml
+faultpilot:
+  catalog:
+    services:
+      order-service:
+        database-ref: orders-postgres
+  database:
+    instances:
+      orders-postgres:
+        jdbc-url: jdbc:postgresql://postgres.internal:5432/orders
+        username: faultpilot_diagnostic
+        password: ${ORDERS_DIAGNOSTIC_DATABASE_PASSWORD}
+        query-timeout-seconds: 3
+        max-rows: 20
+```
+
+When the target is unavailable, missing `pg_stat_statements`, or lacks the statistics grant, FaultPilot records `DATA_UNAVAILABLE`. It does not convert missing database evidence into a model-only diagnosis. A slow statement fingerprint becomes `SLOW_SQL_FOUND`; a long non-idle connection group becomes `CONNECTION_HOLDING_QUERY_FOUND`. Either result still requires the EvidenceGate's independent latency or pool-pressure corroboration before a cause can be confirmed.
 
 ## Business service requirements
 
@@ -122,8 +164,9 @@ Create an incident with `serviceName` set to `order-service` and a symptom such 
 1. Query `http://localhost:9090/api/v1/query?query=process_cpu_usage{job="faultpilot-lab-order"}` and confirm a result.
 2. Create an incident through the console or `POST /api/incidents`.
 3. Inspect the incident traces and confirm tool sources start with `prometheus:`, `actuator:`, or `arthas:`.
-4. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, or `DATA_UNAVAILABLE` is stored.
-5. Confirm the incident ends at `DIAGNOSED` and `GET /api/pending-actions/by-incident/{id}` returns an empty list.
-6. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
+4. With a PostgreSQL target configured, inspect tool sources beginning with `postgres:` and confirm that diagnostic summaries expose only statement fingerprints or curated connection-group metadata.
+5. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, `SLOW_SQL_FOUND`, `CONNECTION_HOLDING_QUERY_FOUND`, or `DATA_UNAVAILABLE` is stored.
+6. Confirm the incident ends at `DIAGNOSED` only when the EvidenceGate has the required independent evidence, and that `GET /api/pending-actions/by-incident/{id}` returns an empty list.
+7. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
 
 This mode is intentionally diagnostic-only. A future production remediation integration should use separately authenticated, allowlisted runbook handlers and remain behind the existing human confirmation workflow.

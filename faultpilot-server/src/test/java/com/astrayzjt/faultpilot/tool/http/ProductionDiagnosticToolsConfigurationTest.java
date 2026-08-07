@@ -6,6 +6,7 @@ import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
 import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
+import com.astrayzjt.faultpilot.observability.PostgresDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
 import org.junit.jupiter.api.Test;
@@ -72,6 +73,41 @@ class ProductionDiagnosticToolsConfigurationTest {
 
         assertThat(result.evidenceType()).isEqualTo(EvidenceType.CPU_HOT_METHOD_FOUND);
         assertThat(result.summary()).contains("PricingLoop.java:49");
+    }
+
+    @Test
+    void mapsCuratedPostgresFingerprintToSlowSqlEvidence() {
+        PostgresDiagnosticsClient client = mock(PostgresDiagnosticsClient.class);
+        PostgresDiagnosticsClient.SlowStatement statement = new PostgresDiagnosticsClient.SlowStatement(
+                "918273", 18, 1_250, 1_600);
+        when(client.inspectSlowStatements("order-service")).thenReturn(
+                new PostgresDiagnosticsClient.SlowStatementInspection(true, true, "orders", List.of(statement)));
+        ObservabilityProperties properties = new ObservabilityProperties();
+        DiagnosticTool<Map<String, Object>> tool = new ProductionDiagnosticToolsConfiguration()
+                .inspectPostgresSlowStatements(client, properties);
+
+        var result = tool.execute(Map.of("sql", "select * from customer"), context());
+
+        assertThat(tool.owner()).isEqualTo(AgentType.DATABASE_AGENT);
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.SLOW_SQL_FOUND);
+        assertThat(result.data().toString()).contains("918273").doesNotContain("select * from customer");
+    }
+
+    @Test
+    void mapsCuratedPostgresHolderToConnectionHoldingEvidence() {
+        PostgresDiagnosticsClient client = mock(PostgresDiagnosticsClient.class);
+        PostgresDiagnosticsClient.ConnectionHolder holder = new PostgresDiagnosticsClient.ConnectionHolder(
+                "active", "Lock", 4, 5_000);
+        when(client.inspectConnectionHolders("order-service")).thenReturn(
+                new PostgresDiagnosticsClient.ConnectionHolderInspection(true, true, "orders", List.of(holder)));
+        ObservabilityProperties properties = new ObservabilityProperties();
+        DiagnosticTool<Map<String, Object>> tool = new ProductionDiagnosticToolsConfiguration()
+                .inspectPostgresConnectionHolders(client, properties);
+
+        var result = tool.execute(Map.of(), context());
+
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.CONNECTION_HOLDING_QUERY_FOUND);
+        assertThat(result.data().toString()).contains("longestAgeMillis=5000");
     }
 
     private ToolExecutionContext context() {

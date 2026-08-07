@@ -15,6 +15,8 @@ public class ObservabilityProperties {
     private double redisMemoryUsageHighRatio = 0.90;
     private long redisEvictionsHighThreshold = 1;
     private long redisSlowCommandThresholdMicros = 10_000;
+    private long databaseSlowQueryThresholdMillis = 1_000;
+    private long databaseHoldingQueryThresholdMillis = 1_000;
 
     public String getPrometheusUrl() {
         return prometheusUrl;
@@ -94,5 +96,21 @@ public class ObservabilityProperties {
 
     public void setRedisSlowCommandThresholdMicros(long redisSlowCommandThresholdMicros) {
         this.redisSlowCommandThresholdMicros = redisSlowCommandThresholdMicros;
+    }
+
+    public long getDatabaseSlowQueryThresholdMillis() {
+        return databaseSlowQueryThresholdMillis;
+    }
+
+    public void setDatabaseSlowQueryThresholdMillis(long databaseSlowQueryThresholdMillis) {
+        this.databaseSlowQueryThresholdMillis = databaseSlowQueryThresholdMillis;
+    }
+
+    public long getDatabaseHoldingQueryThresholdMillis() {
+        return databaseHoldingQueryThresholdMillis;
+    }
+
+    public void setDatabaseHoldingQueryThresholdMillis(long databaseHoldingQueryThresholdMillis) {
+        this.databaseHoldingQueryThresholdMillis = databaseHoldingQueryThresholdMillis;
     }
 }
