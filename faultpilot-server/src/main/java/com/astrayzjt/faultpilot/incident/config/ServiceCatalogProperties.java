@@ -25,6 +25,7 @@ public class ServiceCatalogProperties {
             Map<String, String> prometheusLabels,
             String actuatorBaseUrl,
             String databaseRef,
+            String redisRef,
             List<String> downstreams,
             List<String> allowedActions,
             String arthasBaseUrl,
@@ -37,8 +38,21 @@ public class ServiceCatalogProperties {
                                  String databaseRef,
                                  List<String> downstreams,
                                  List<String> allowedActions) {
-            this(prometheusLabels, actuatorBaseUrl, databaseRef, downstreams, allowedActions,
+            this(prometheusLabels, actuatorBaseUrl, databaseRef, null, downstreams, allowedActions,
                     null, null, null, List.of());
+        }
+
+        public ServiceDefinition(Map<String, String> prometheusLabels,
+                                 String actuatorBaseUrl,
+                                 String databaseRef,
+                                 List<String> downstreams,
+                                 List<String> allowedActions,
+                                 String arthasBaseUrl,
+                                 String arthasUsername,
+                                 String arthasPassword,
+                                 List<String> codePackagePrefixes) {
+            this(prometheusLabels, actuatorBaseUrl, databaseRef, null, downstreams, allowedActions,
+                    arthasBaseUrl, arthasUsername, arthasPassword, codePackagePrefixes);
         }
 
         @ConstructorBinding
@@ -46,6 +60,7 @@ public class ServiceCatalogProperties {
             prometheusLabels = prometheusLabels == null ? Map.of() : Map.copyOf(prometheusLabels);
             downstreams = downstreams == null ? List.of() : List.copyOf(downstreams);
             allowedActions = allowedActions == null ? List.of() : List.copyOf(allowedActions);
+            redisRef = normalize(redisRef);
             arthasBaseUrl = normalize(arthasBaseUrl);
             arthasUsername = normalize(arthasUsername);
             arthasPassword = normalize(arthasPassword);
@@ -62,6 +77,10 @@ public class ServiceCatalogProperties {
 
         public boolean hasCodePackagePrefixes() {
             return !codePackagePrefixes.isEmpty();
+        }
+
+        public boolean hasRedisConfiguration() {
+            return redisRef != null;
         }
 
         private static String normalize(String value) {

@@ -17,3 +17,7 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: [host.docker.internal:18082]
+
+  - job_name: faultpilot-lab-redis
+    static_configs:
+      - targets: [redis-exporter:9121]

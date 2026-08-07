@@ -1,6 +1,7 @@
 package com.astrayzjt.faultpilot.lab.order.fault;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Semaphore;
+import java.util.function.Supplier;
 
 @Service
 public class FaultScenarioManager {
@@ -31,6 +35,8 @@ public class FaultScenarioManager {
     private static final Duration MAX_TTL = Duration.ofMinutes(5);
     private static final int BLOCKED_POOL_SIZE = 4;
     private static final int BLOCKED_TASK_COUNT = 24;
+    private static final int REDIS_CLIENT_POOL_SIZE = 4;
+    private static final long REDIS_LATENCY_MILLIS = 450;
 
     private final JdbcTemplate jdbcTemplate;
     private final HikariDataSource dataSource;
@@ -42,8 +48,12 @@ public class FaultScenarioManager {
     });
     private final AtomicBoolean slowSqlEnabled = new AtomicBoolean();
     private final ThreadPoolExecutor exhaustedPool;
+    private final Semaphore redisClientPermits = new Semaphore(REDIS_CLIENT_POOL_SIZE, true);
+    private final AtomicInteger redisClientActive = new AtomicInteger();
+    private final AtomicInteger redisClientPending = new AtomicInteger();
     private volatile CountDownLatch blockedTasks = new CountDownLatch(1);
     private volatile CountDownLatch heldConnections = new CountDownLatch(1);
+    private volatile CountDownLatch redisClientBlockers = new CountDownLatch(1);
     private final List<Connection> borrowedConnections = new ArrayList<>();
 
     public FaultScenarioManager(JdbcTemplate jdbcTemplate, HikariDataSource dataSource, MeterRegistry meterRegistry) {
@@ -57,6 +67,9 @@ public class FaultScenarioManager {
             return thread;
         });
         ExecutorServiceMetrics.monitor(meterRegistry, exhaustedPool, "labBlockedExecutor");
+        Gauge.builder("faultpilot.redis.client.pool.active", redisClientActive, AtomicInteger::get).register(meterRegistry);
+        Gauge.builder("faultpilot.redis.client.pool.pending", redisClientPending, AtomicInteger::get).register(meterRegistry);
+        Gauge.builder("faultpilot.redis.client.pool.max", () -> REDIS_CLIENT_POOL_SIZE).register(meterRegistry);
     }
 
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
@@ -145,6 +158,48 @@ public class FaultScenarioManager {
         return exhaustedPool.getActiveCount();
     }
 
+    public int redisClientPoolActiveCount() {
+        return redisClientActive.get();
+    }
+
+    public int redisClientPoolPendingCount() {
+        return redisClientPending.get();
+    }
+
+    /**
+     * Lab-only admission control makes a cache client pool fault observable without granting a diagnostic tool write access.
+     */
+    public <T> T executeRedisOperation(Supplier<T> operation) {
+        boolean acquired = false;
+        boolean pending = false;
+        try {
+            if (!redisClientPermits.tryAcquire()) {
+                pending = true;
+                redisClientPending.incrementAndGet();
+                if (!redisClientPermits.tryAcquire(2, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Lab Redis client pool wait timed out");
+                }
+            }
+            acquired = true;
+            redisClientActive.incrementAndGet();
+            if (isActive(ScenarioCode.REDIS_LATENCY)) {
+                sleep(REDIS_LATENCY_MILLIS);
+            }
+            return operation.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for a lab Redis client permit", exception);
+        } finally {
+            if (acquired) {
+                redisClientActive.decrementAndGet();
+                redisClientPermits.release();
+            }
+            if (pending) {
+                redisClientPending.decrementAndGet();
+            }
+        }
+    }
+
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 5000)
     public synchronized void recoverExpired() {
         Instant now = Instant.now();
@@ -161,6 +216,8 @@ public class FaultScenarioManager {
             case THREAD_POOL_EXHAUSTED -> startBlockedTasks(active);
             case SLOW_SQL -> slowSqlEnabled.set(true);
             case DB_POOL_EXHAUSTED -> startHeldConnections(active);
+            case REDIS_LATENCY -> { }
+            case REDIS_CLIENT_POOL_EXHAUSTED -> startRedisClientPoolExhausted(active);
         }
     }
 
@@ -180,6 +237,8 @@ public class FaultScenarioManager {
                     borrowedConnections.clear();
                 }
             }
+            case REDIS_LATENCY -> { }
+            case REDIS_CLIENT_POOL_EXHAUSTED -> redisClientBlockers.countDown();
         }
     }
 
@@ -228,6 +287,48 @@ public class FaultScenarioManager {
         }
     }
 
+    private void startRedisClientPoolExhausted(ActiveFault active) {
+        redisClientBlockers = new CountDownLatch(1);
+        CountDownLatch acquired = new CountDownLatch(REDIS_CLIENT_POOL_SIZE);
+        for (int i = 0; i < REDIS_CLIENT_POOL_SIZE; i++) {
+            workerExecutor.submit(() -> {
+                boolean permit = false;
+                try {
+                    permit = redisClientPermits.tryAcquire(2, TimeUnit.SECONDS);
+                    if (!permit) {
+                        return;
+                    }
+                    redisClientActive.incrementAndGet();
+                    acquired.countDown();
+                    redisClientBlockers.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    if (permit) {
+                        redisClientActive.decrementAndGet();
+                        redisClientPermits.release();
+                    }
+                }
+            });
+        }
+        try {
+            if (!acquired.await(3, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Lab Redis client pool could not acquire all permits");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while activating lab Redis client pool fault", exception);
+        }
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private ScenarioCode parseCode(String rawCode) {
         try {
             return ScenarioCode.valueOf(rawCode.trim().toUpperCase());
@@ -267,7 +368,8 @@ public class FaultScenarioManager {
 
     @PreDestroy
     public void shutdown() {
-        activeFaults.keySet().forEach(code -> recover(activeFaults.get(code).run.scenarioRunId()));
+        List<UUID> activeRunIds = activeFaults.values().stream().map(active -> active.run.scenarioRunId()).toList();
+        activeRunIds.forEach(this::recover);
         workerExecutor.shutdownNow();
         exhaustedPool.shutdownNow();
     }

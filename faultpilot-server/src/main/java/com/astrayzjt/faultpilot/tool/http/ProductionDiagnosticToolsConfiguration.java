@@ -3,11 +3,13 @@ package com.astrayzjt.faultpilot.tool.http;
 import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
+import com.astrayzjt.faultpilot.incident.config.RedisCatalogProperties;
 import com.astrayzjt.faultpilot.incident.config.ServiceCatalogProperties;
 import com.astrayzjt.faultpilot.observability.ActuatorClient;
 import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
+import com.astrayzjt.faultpilot.observability.RedisDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
 import com.astrayzjt.faultpilot.tool.registry.ToolResult;
@@ -41,6 +43,13 @@ public class ProductionDiagnosticToolsConfiguration {
                               ServiceCatalogProperties catalog,
                               com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         return new ArthasClient(properties, catalog, objectMapper);
+    }
+
+    @Bean
+    RedisDiagnosticsClient redisDiagnosticsClient(ServiceCatalogProperties serviceCatalog,
+                                                  RedisCatalogProperties redisCatalog,
+                                                  ObservabilityProperties properties) {
+        return new RedisDiagnosticsClient(serviceCatalog, redisCatalog, properties);
     }
 
     @Bean
@@ -215,6 +224,112 @@ public class ProductionDiagnosticToolsConfiguration {
                             high ? EvidenceType.DOWNSTREAM_LATENCY_HIGH : null,
                             source(downstream, "http_server_requests_seconds_max"));
                 });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> queryPrometheusRedisCommandLatency(PrometheusClient client,
+                                                                             ObservabilityProperties properties) {
+        return metricTool("query_prometheus_redis_command_latency", AgentType.CACHE_AGENT,
+                (service, ignored) -> {
+                    String metric = "faultpilot_redis_command_latency_seconds_max";
+                    List<Sample> samples = client.queryMetric(metric, service);
+                    if (samples.isEmpty()) {
+                        return ToolResult.failure(source(service, metric),
+                                "Prometheus Redis command latency metric is unavailable");
+                    }
+                    double value = samples.stream().mapToDouble(Sample::value).max().orElse(0);
+                    boolean high = value >= properties.getRedisCommandLatencyHighSeconds();
+                    return new ToolResult(true,
+                            high ? "Redis command latency is above the configured threshold" :
+                                    "Redis command latency is within the configured range",
+                            Map.of("maxSeconds", value, "threshold", properties.getRedisCommandLatencyHighSeconds()),
+                            high ? EvidenceType.REDIS_COMMAND_LATENCY_HIGH : EvidenceType.REDIS_COMMAND_LATENCY_NORMAL,
+                            source(service, metric));
+                });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> queryPrometheusRedisClientPool(PrometheusClient client) {
+        return metricTool("query_prometheus_redis_client_pool", AgentType.CACHE_AGENT,
+                (service, ignored) -> {
+                    List<Sample> activeSamples = client.queryMetric("faultpilot_redis_client_pool_active", service);
+                    List<Sample> maxSamples = client.queryMetric("faultpilot_redis_client_pool_max", service);
+                    List<Sample> pendingSamples = client.queryMetric("faultpilot_redis_client_pool_pending", service);
+                    if (activeSamples.isEmpty() || maxSamples.isEmpty() || pendingSamples.isEmpty()) {
+                        return ToolResult.failure(source(service, "faultpilot_redis_client_pool"),
+                                "Prometheus Redis client pool metrics are unavailable");
+                    }
+                    double active = activeSamples.stream().mapToDouble(Sample::value).max().orElse(0);
+                    double max = maxSamples.stream().mapToDouble(Sample::value).max().orElse(0);
+                    double pending = pendingSamples.stream().mapToDouble(Sample::value).max().orElse(0);
+                    boolean exhausted = pending > 0 || (max > 0 && active >= max);
+                    return new ToolResult(true,
+                            exhausted ? "Redis client pool has waiting or saturated callers" :
+                                    "Redis client pool is within normal range",
+                            Map.of("activeClients", active, "maxClients", max, "pendingClients", pending),
+                            exhausted ? EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH : EvidenceType.REDIS_CLIENT_POOL_NORMAL,
+                            source(service, "faultpilot_redis_client_pool"));
+                });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectRedisServerInfo(RedisDiagnosticsClient client,
+                                                                 ObservabilityProperties properties) {
+        return tool("inspect_redis_server_info", AgentType.CACHE_AGENT, (service, ignored) -> {
+            RedisDiagnosticsClient.ServerInspection inspection = client.inspectServer(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Redis instance is configured for this service", Map.of("configured", false),
+                        null, "redis:" + service + ":info");
+            }
+            if (!inspection.available()) {
+                return ToolResult.failure("redis:" + inspection.redisReference() + ":info",
+                        "Configured Redis read-only INFO probe is unavailable");
+            }
+            long usedMemory = inspection.values().getOrDefault("used_memory", 0L);
+            long maxMemory = inspection.values().getOrDefault("maxmemory", 0L);
+            long evictedKeys = inspection.values().getOrDefault("evicted_keys", 0L);
+            long connectedClients = inspection.values().getOrDefault("connected_clients", 0L);
+            long blockedClients = inspection.values().getOrDefault("blocked_clients", 0L);
+            boolean memoryPressure = maxMemory > 0 && (double) usedMemory / maxMemory >= properties.getRedisMemoryUsageHighRatio();
+            boolean evictions = evictedKeys >= properties.getRedisEvictionsHighThreshold();
+            EvidenceType evidenceType = memoryPressure ? EvidenceType.REDIS_MEMORY_PRESSURE :
+                    evictions ? EvidenceType.REDIS_EVICTIONS_HIGH : null;
+            String summary = memoryPressure ? "Redis memory use is above the configured observation threshold" :
+                    evictions ? "Redis reports evicted keys above the configured observation threshold" :
+                            "Redis INFO memory, stats, and clients sections are within configured observation thresholds";
+            return new ToolResult(true, summary,
+                    Map.of("redisRef", inspection.redisReference(), "usedMemoryBytes", usedMemory,
+                            "maxMemoryBytes", maxMemory, "evictedKeys", evictedKeys,
+                            "connectedClients", connectedClients, "blockedClients", blockedClients),
+                    evidenceType, "redis:" + inspection.redisReference() + ":info");
+        });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectRedisSlowLog(RedisDiagnosticsClient client,
+                                                              ObservabilityProperties properties) {
+        return tool("inspect_redis_slow_log", AgentType.CACHE_AGENT, (service, ignored) -> {
+            RedisDiagnosticsClient.SlowLogInspection inspection = client.readSlowLog(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Redis instance is configured for this service", Map.of("configured", false),
+                        null, "redis:" + service + ":slowlog");
+            }
+            if (!inspection.available()) {
+                return ToolResult.failure("redis:" + inspection.redisReference() + ":slowlog",
+                        "Configured Redis read-only SLOWLOG probe is unavailable");
+            }
+            List<RedisDiagnosticsClient.SlowLogEntry> slowEntries = inspection.entries().stream()
+                    .filter(entry -> entry.durationMicros() >= properties.getRedisSlowCommandThresholdMicros())
+                    .toList();
+            return new ToolResult(true,
+                    slowEntries.isEmpty() ? "Redis SLOWLOG has no command above the configured duration threshold" :
+                            "Redis SLOWLOG contains " + slowEntries.size() + " bounded slow command record(s)",
+                    Map.of("redisRef", inspection.redisReference(),
+                            "thresholdMicros", properties.getRedisSlowCommandThresholdMicros(),
+                            "entries", slowEntries.stream().map(RedisDiagnosticsClient.SlowLogEntry::asEvidenceData).toList()),
+                    slowEntries.isEmpty() ? null : EvidenceType.REDIS_SLOW_COMMAND_FOUND,
+                    "redis:" + inspection.redisReference() + ":slowlog");
+        });
     }
 
     @Bean

@@ -61,6 +61,42 @@ public class LabDiagnosticToolsConfiguration {
                         source));
     }
 
+    @Bean
+    DiagnosticTool<Map<String, Object>> queryCacheOverview(ServiceCatalogProperties catalog) {
+        return tool("query_cache_overview", AgentType.CACHE_AGENT, "/api/orders/internal/diagnostics", catalog,
+                (data, source) -> {
+                    if (Boolean.TRUE.equals(data.get("redisClientPoolExhausted"))) {
+                        return new ToolResult(true, "Lab Redis client pool is saturated", data,
+                                EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH, source);
+                    }
+                    if (Boolean.TRUE.equals(data.get("redisLatency"))) {
+                        return new ToolResult(true, "Lab Redis command latency scenario is active", data,
+                                EvidenceType.REDIS_COMMAND_LATENCY_HIGH, source);
+                    }
+                    return new ToolResult(true, "Lab Redis cache overview is within normal fault signals", data,
+                            EvidenceType.REDIS_COMMAND_LATENCY_NORMAL, source);
+                });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> queryCacheProfile(ServiceCatalogProperties catalog) {
+        return tool("query_cache_profile", AgentType.CACHE_AGENT, "/api/orders/internal/diagnostics", catalog,
+                (data, source) -> {
+                    if (Boolean.TRUE.equals(data.get("redisLatency"))) {
+                        return new ToolResult(true,
+                                "Lab cache profile confirms a controlled slow Redis command observation", data,
+                                EvidenceType.REDIS_SLOW_COMMAND_FOUND, source + ":profile");
+                    }
+                    if (Boolean.TRUE.equals(data.get("redisClientPoolExhausted"))) {
+                        return new ToolResult(true,
+                                "Lab cache profile isolates caller-pool saturation from a Redis server latency scenario", data,
+                                EvidenceType.REDIS_COMMAND_LATENCY_NORMAL, source + ":profile");
+                    }
+                    return new ToolResult(true, "Lab cache profile found no corroborating cache fault", data, null,
+                            source + ":profile");
+                });
+    }
+
     private DiagnosticTool<Map<String, Object>> tool(
             String name,
             AgentType owner,

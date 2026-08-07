@@ -38,6 +38,10 @@ faultpilot:
     thread-pool-saturation-ratio: ${THREAD_POOL_SATURATION_RATIO:0.90}
     heap-usage-high-ratio: ${HEAP_USAGE_HIGH_RATIO:0.90}
     http-latency-high-seconds: ${HTTP_LATENCY_HIGH_SECONDS:1.0}
+    redis-command-latency-high-seconds: ${REDIS_COMMAND_LATENCY_HIGH_SECONDS:0.20}
+    redis-memory-usage-high-ratio: ${REDIS_MEMORY_USAGE_HIGH_RATIO:0.90}
+    redis-evictions-high-threshold: ${REDIS_EVICTIONS_HIGH_THRESHOLD:1}
+    redis-slow-command-threshold-micros: ${REDIS_SLOW_COMMAND_THRESHOLD_MICROS:10000}
   remediation:
     enabled: ${FAULTPILOT_REMEDIATION_ENABLED:true}
   security:
@@ -52,6 +56,7 @@ faultpilot:
           job: ${ORDER_SERVICE_PROMETHEUS_JOB:faultpilot-lab-order}
         actuator-base-url: ${ORDER_SERVICE_URL:http://localhost:8081}
         database-ref: lab-postgres
+        redis-ref: ${ORDER_SERVICE_REDIS_REF:lab-redis}
         downstreams:
           - inventory-service
         allowed-actions:
@@ -77,6 +82,16 @@ faultpilot:
         arthas-password: ${INVENTORY_SERVICE_ARTHAS_PASSWORD:}
         code-package-prefixes:
           - ${INVENTORY_SERVICE_CODE_PACKAGE_PREFIX:}
+  redis:
+    instances:
+      lab-redis:
+        host: ${LAB_REDIS_HOST:localhost}
+        port: ${LAB_REDIS_PORT:56379}
+        username: ${LAB_REDIS_USERNAME:}
+        password: ${LAB_REDIS_PASSWORD:}
+        tls: ${LAB_REDIS_TLS:false}
+        database: ${LAB_REDIS_DATABASE:0}
+        slow-log-limit: ${REDIS_SLOW_LOG_LIMIT:10}
   model:
     base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     model-name: ${QWEN_MODEL:qwen3.7-plus}

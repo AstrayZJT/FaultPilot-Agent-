@@ -11,6 +11,10 @@ public class ObservabilityProperties {
     private double threadPoolSaturationRatio = 0.90;
     private double heapUsageHighRatio = 0.90;
     private double httpLatencyHighSeconds = 1.0;
+    private double redisCommandLatencyHighSeconds = 0.20;
+    private double redisMemoryUsageHighRatio = 0.90;
+    private long redisEvictionsHighThreshold = 1;
+    private long redisSlowCommandThresholdMicros = 10_000;
 
     public String getPrometheusUrl() {
         return prometheusUrl;
@@ -58,5 +62,37 @@ public class ObservabilityProperties {
 
     public void setHttpLatencyHighSeconds(double httpLatencyHighSeconds) {
         this.httpLatencyHighSeconds = httpLatencyHighSeconds;
+    }
+
+    public double getRedisCommandLatencyHighSeconds() {
+        return redisCommandLatencyHighSeconds;
+    }
+
+    public void setRedisCommandLatencyHighSeconds(double redisCommandLatencyHighSeconds) {
+        this.redisCommandLatencyHighSeconds = redisCommandLatencyHighSeconds;
+    }
+
+    public double getRedisMemoryUsageHighRatio() {
+        return redisMemoryUsageHighRatio;
+    }
+
+    public void setRedisMemoryUsageHighRatio(double redisMemoryUsageHighRatio) {
+        this.redisMemoryUsageHighRatio = redisMemoryUsageHighRatio;
+    }
+
+    public long getRedisEvictionsHighThreshold() {
+        return redisEvictionsHighThreshold;
+    }
+
+    public void setRedisEvictionsHighThreshold(long redisEvictionsHighThreshold) {
+        this.redisEvictionsHighThreshold = redisEvictionsHighThreshold;
+    }
+
+    public long getRedisSlowCommandThresholdMicros() {
+        return redisSlowCommandThresholdMicros;
+    }
+
+    public void setRedisSlowCommandThresholdMicros(long redisSlowCommandThresholdMicros) {
+        this.redisSlowCommandThresholdMicros = redisSlowCommandThresholdMicros;
     }
 }
