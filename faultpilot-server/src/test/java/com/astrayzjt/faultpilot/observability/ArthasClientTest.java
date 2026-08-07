@@ -78,6 +78,23 @@ class ArthasClientTest {
         });
     }
 
+    @Test
+    void usesFixedHotThreadCommandAndReturnsApplicationMethod() {
+        AtomicReference<String> command = new AtomicReference<>();
+        ArthasClient client = new ArthasClient(catalog(), new ObjectMapper(), Duration.ofSeconds(1),
+                (endpoint, authorization, timeout, receivedCommand) -> {
+                    command.set(receivedCommand);
+                    return new ArthasHttpResponse(200, hotThreadsResponse().getBytes(StandardCharsets.UTF_8), false);
+                });
+
+        ArthasClient.HotThreadInspection inspection = client.inspectHotThreads("order-service");
+
+        assertThat(command.get()).isEqualTo(ArthasClient.HOT_THREADS_COMMAND);
+        assertThat(inspection.available()).isTrue();
+        assertThat(inspection.hotThreads()).singleElement().satisfies(thread ->
+                assertThat(thread.sourceLocation()).contains("FaultScenarioManager.java:207"));
+    }
+
     private ServiceCatalogProperties catalog() {
         ServiceCatalogProperties catalog = new ServiceCatalogProperties();
         catalog.setServices(Map.of("order-service", new ServiceCatalogProperties.ServiceDefinition(
@@ -131,6 +148,27 @@ class ArthasClientTest {
                         "stackTrace": [
                           {"className": "java.util.concurrent.CountDownLatch", "methodName": "await", "fileName": "CountDownLatch.java", "lineNumber": 230},
                           {"className": "com.astrayzjt.faultpilot.lab.order.fault.FaultScenarioManager", "methodName": "lambda$startBlockedTasks$8", "fileName": "FaultScenarioManager.java", "lineNumber": 207}
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """;
+    }
+
+    private String hotThreadsResponse() {
+        return """
+                {
+                  "state": "SUCCEEDED",
+                  "body": {
+                    "busyThreads": [
+                      {
+                        "id": 71,
+                        "name": "lab-fault-worker",
+                        "state": "RUNNABLE",
+                        "stackTrace": [
+                          {"className": "java.lang.Math", "methodName": "sin", "fileName": "Math.java", "lineNumber": 1},
+                          {"className": "com.astrayzjt.faultpilot.lab.order.fault.FaultScenarioManager", "methodName": "lambda$startCpuHotspot$7", "fileName": "FaultScenarioManager.java", "lineNumber": 207}
                         ]
                       }
                     ]

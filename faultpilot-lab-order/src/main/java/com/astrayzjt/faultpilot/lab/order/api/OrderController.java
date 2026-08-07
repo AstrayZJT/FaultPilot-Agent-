@@ -40,6 +40,7 @@ public class OrderController {
         return Map.ofEntries(
                 Map.entry("service", "order-service"),
                 Map.entry("cpuHotspot", faultManager.isActive(com.astrayzjt.faultpilot.lab.order.fault.ScenarioCode.CPU_HOTSPOT)),
+                Map.entry("cpuHotspotWorkers", faultManager.cpuHotspotWorkerCount()),
                 Map.entry("threadPoolExhausted", faultManager.isActive(com.astrayzjt.faultpilot.lab.order.fault.ScenarioCode.THREAD_POOL_EXHAUSTED)),
                 Map.entry("slowSql", faultManager.isSlowSqlEnabled()),
                 Map.entry("dbPoolExhausted", faultManager.isActive(com.astrayzjt.faultpilot.lab.order.fault.ScenarioCode.DB_POOL_EXHAUSTED)),

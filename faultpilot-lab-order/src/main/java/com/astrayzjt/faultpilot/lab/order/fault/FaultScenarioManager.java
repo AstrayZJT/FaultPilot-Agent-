@@ -47,6 +47,7 @@ public class FaultScenarioManager {
         return thread;
     });
     private final AtomicBoolean slowSqlEnabled = new AtomicBoolean();
+    private final AtomicInteger cpuHotspotWorkers = new AtomicInteger();
     private final ThreadPoolExecutor exhaustedPool;
     private final Semaphore redisClientPermits = new Semaphore(REDIS_CLIENT_POOL_SIZE, true);
     private final AtomicInteger redisClientActive = new AtomicInteger();
@@ -154,6 +155,10 @@ public class FaultScenarioManager {
         return exhaustedPool.getQueue().size();
     }
 
+    public int cpuHotspotWorkerCount() {
+        return cpuHotspotWorkers.get();
+    }
+
     public int blockedActiveCount() {
         return exhaustedPool.getActiveCount();
     }
@@ -246,13 +251,18 @@ public class FaultScenarioManager {
         for (int i = 0; i < 2; i++) {
             workerExecutor.submit(() -> {
                 double value = 0;
-                while (!active.stopped.get()) {
-                    for (int j = 0; j < 100_000; j++) {
-                        value += Math.sin(j) * Math.cos(value);
+                cpuHotspotWorkers.incrementAndGet();
+                try {
+                    while (!active.stopped.get()) {
+                        for (int j = 0; j < 100_000; j++) {
+                            value += Math.sin(j) * Math.cos(value);
+                        }
+                        if (value == Double.MAX_VALUE) {
+                            break;
+                        }
                     }
-                    if (value == Double.MAX_VALUE) {
-                        break;
-                    }
+                } finally {
+                    cpuHotspotWorkers.decrementAndGet();
                 }
             });
         }

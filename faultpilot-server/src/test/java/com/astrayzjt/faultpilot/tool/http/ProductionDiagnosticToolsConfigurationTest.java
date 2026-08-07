@@ -58,6 +58,22 @@ class ProductionDiagnosticToolsConfigurationTest {
         assertThat(result.data()).containsEntry("waitingThreadCount", 4);
     }
 
+    @Test
+    void mapsCuratedArthasHotMethodToCpuEvidence() {
+        ArthasClient client = mock(ArthasClient.class);
+        ArthasClient.HotThread thread = new ArthasClient.HotThread(41, "cpu-worker", "RUNNABLE",
+                "com.example.orders.PricingLoop.recalculate(PricingLoop.java:49)");
+        when(client.inspectHotThreads("order-service")).thenReturn(
+                new ArthasClient.HotThreadInspection(true, true, true, List.of(thread)));
+        DiagnosticTool<Map<String, Object>> tool =
+                new ProductionDiagnosticToolsConfiguration().queryArthasHotThreads(client);
+
+        var result = tool.execute(Map.of(), context());
+
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.CPU_HOT_METHOD_FOUND);
+        assertThat(result.summary()).contains("PricingLoop.java:49");
+    }
+
     private ToolExecutionContext context() {
         return new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), AgentType.JVM_AGENT,
                 "order-service", Instant.now().plusSeconds(10));

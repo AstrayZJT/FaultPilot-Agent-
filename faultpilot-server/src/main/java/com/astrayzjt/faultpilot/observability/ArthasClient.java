@@ -29,6 +29,7 @@ public class ArthasClient {
 
     // Arthas --all returns only thread statistics. The bounded -n form includes stack frames.
     static final String WAITING_THREADS_COMMAND = "thread --state WAITING -n 50";
+    static final String HOT_THREADS_COMMAND = "thread -n 8";
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
     private static final int MAX_RETURNED_THREADS = 8;
     private static final int MAX_STACK_FRAMES = 16;
@@ -77,6 +78,31 @@ public class ArthasClient {
         }
     }
 
+    public HotThreadInspection inspectHotThreads(String serviceName) {
+        ServiceDefinition definition = catalog.require(serviceName);
+        if (!definition.hasArthasConfiguration()) {
+            return HotThreadInspection.notConfigured();
+        }
+        if (!definition.hasCodePackagePrefixes()) {
+            return HotThreadInspection.missingCodePackagePrefixes();
+        }
+        try {
+            ArthasHttpResponse response = executor.execute(apiUri(definition.arthasBaseUrl()),
+                    basicAuthorization(definition.arthasUsername(), definition.arthasPassword()),
+                    timeout, HOT_THREADS_COMMAND);
+            if (response.truncated() || response.statusCode() < 200 || response.statusCode() >= 300) {
+                return HotThreadInspection.unavailable();
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            if (root == null || commandFailed(root)) {
+                return HotThreadInspection.unavailable();
+            }
+            return summarizeHotThreads(root, definition.codePackagePrefixes());
+        } catch (IOException | RuntimeException exception) {
+            return HotThreadInspection.unavailable();
+        }
+    }
+
     private ThreadInspection summarize(JsonNode root, List<String> prefixes) {
         List<JsonNode> threadNodes = new ArrayList<>();
         List<JsonNode> threadInfoNodes = root.findValues("threadInfo");
@@ -117,6 +143,39 @@ public class ArthasClient {
             }
         }
         return ThreadInspection.available(waitingThreadCount, blockingThreads);
+    }
+
+    private HotThreadInspection summarizeHotThreads(JsonNode root, List<String> prefixes) {
+        List<JsonNode> threadNodes = new ArrayList<>();
+        List<JsonNode> busyThreadNodes = root.findValues("busyThreads");
+        List<JsonNode> threadInfoNodes = root.findValues("threadInfo");
+        List<JsonNode> sources = !busyThreadNodes.isEmpty() ? busyThreadNodes : threadInfoNodes;
+        if (sources.isEmpty()) {
+            return HotThreadInspection.unavailable();
+        }
+        sources.forEach(node -> collectThreadNodes(node, threadNodes));
+
+        List<HotThread> hotThreads = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode thread : threadNodes) {
+            List<StackFrame> frames = stackFrames(thread);
+            StackFrame applicationFrame = frames.stream()
+                    .filter(frame -> isApplicationFrame(frame, prefixes))
+                    .findFirst()
+                    .orElse(null);
+            if (applicationFrame == null) {
+                continue;
+            }
+            HotThread hotThread = new HotThread(thread.path("id").asLong(thread.path("threadId").asLong(-1)),
+                    defaultValue(text(thread, "name", "threadName"), "unnamed"),
+                    defaultValue(text(thread, "state", "threadState"), "UNKNOWN"),
+                    location(applicationFrame));
+            if (seen.add(hotThread.threadId() + "|" + hotThread.sourceLocation())
+                    && hotThreads.size() < MAX_RETURNED_THREADS) {
+                hotThreads.add(hotThread);
+            }
+        }
+        return HotThreadInspection.available(hotThreads);
     }
 
     private static boolean commandFailed(JsonNode root) {
@@ -247,6 +306,36 @@ public class ArthasClient {
         public Map<String, Object> asEvidenceData() {
             return Map.of("threadId", threadId, "threadName", threadName, "state", state,
                     "sourceLocation", sourceLocation, "blockingOperation", blockingOperation);
+        }
+    }
+
+    public record HotThreadInspection(boolean configured, boolean codePackagePrefixesConfigured, boolean available,
+                                      List<HotThread> hotThreads) {
+        public HotThreadInspection {
+            hotThreads = hotThreads == null ? List.of() : List.copyOf(hotThreads);
+        }
+
+        static HotThreadInspection notConfigured() {
+            return new HotThreadInspection(false, false, false, List.of());
+        }
+
+        static HotThreadInspection missingCodePackagePrefixes() {
+            return new HotThreadInspection(true, false, false, List.of());
+        }
+
+        static HotThreadInspection unavailable() {
+            return new HotThreadInspection(true, true, false, List.of());
+        }
+
+        static HotThreadInspection available(List<HotThread> hotThreads) {
+            return new HotThreadInspection(true, true, true, hotThreads);
+        }
+    }
+
+    public record HotThread(long threadId, String threadName, String state, String sourceLocation) {
+        public Map<String, Object> asEvidenceData() {
+            return Map.of("threadId", threadId, "threadName", threadName, "state", state,
+                    "sourceLocation", sourceLocation);
         }
     }
 

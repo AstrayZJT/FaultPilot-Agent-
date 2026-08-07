@@ -155,6 +155,34 @@ public class ProductionDiagnosticToolsConfiguration {
     }
 
     @Bean
+    DiagnosticTool<Map<String, Object>> queryArthasHotThreads(ArthasClient client) {
+        return tool("query_arthas_hot_threads", AgentType.JVM_AGENT, (service, ignored) -> {
+            ArthasClient.HotThreadInspection inspection = client.inspectHotThreads(service);
+            String source = "arthas:" + service + ":hot-threads";
+            if (!inspection.configured()) {
+                return new ToolResult(true, "Arthas hot-thread inspection is not configured for this service",
+                        Map.of("configured", false), null, source);
+            }
+            if (!inspection.codePackagePrefixesConfigured()) {
+                return new ToolResult(true, "Arthas is configured but no application code package prefixes are configured",
+                        Map.of("configured", true, "codePackagePrefixesConfigured", false), null, source);
+            }
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Arthas hot-thread inspection is unavailable");
+            }
+            Map<String, Object> data = Map.of("hotThreads", inspection.hotThreads().stream()
+                    .map(ArthasClient.HotThread::asEvidenceData).toList());
+            if (inspection.hotThreads().isEmpty()) {
+                return new ToolResult(true, "Arthas found no hot application thread in the bounded sample", data, null, source);
+            }
+            ArthasClient.HotThread first = inspection.hotThreads().getFirst();
+            return new ToolResult(true, "Arthas identified " + inspection.hotThreads().size()
+                    + " hot application thread(s); first application location: " + first.sourceLocation(),
+                    data, EvidenceType.CPU_HOT_METHOD_FOUND, source);
+        });
+    }
+
+    @Bean
     DiagnosticTool<Map<String, Object>> queryPrometheusHikariPool(PrometheusClient client) {
         return metricTool("query_prometheus_hikari_pool", AgentType.DATABASE_AGENT,
                 (service, ignored) -> {

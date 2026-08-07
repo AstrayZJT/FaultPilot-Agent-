@@ -36,6 +36,20 @@ public class LabDiagnosticToolsConfiguration {
     }
 
     @Bean
+    DiagnosticTool<Map<String, Object>> queryJvmHotspotDetail(ServiceCatalogProperties catalog) {
+        return tool("query_jvm_hotspot_detail", AgentType.JVM_AGENT, "/api/orders/internal/diagnostics", catalog,
+                (data, source) -> {
+                    if (Boolean.TRUE.equals(data.get("cpuHotspot"))) {
+                        return new ToolResult(true,
+                                "Lab control plane confirms the controlled CPU workload is executing in FaultScenarioManager.startCpuHotspot",
+                                data, EvidenceType.CPU_HOT_METHOD_FOUND, source + ":cpu-hotspot");
+                    }
+                    return new ToolResult(true, "Lab control plane found no active CPU hotspot workload", data, null,
+                            source + ":cpu-hotspot");
+                });
+    }
+
+    @Bean
     DiagnosticTool<Map<String, Object>> queryDatabaseOverview(ServiceCatalogProperties catalog) {
         return tool("query_database_overview", AgentType.DATABASE_AGENT, "/api/orders/internal/diagnostics", catalog,
                 (data, source) -> {
