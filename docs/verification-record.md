@@ -1,6 +1,6 @@
 # FaultPilot Verification Record
 
-Last updated: 2026-08-06
+Last updated: 2026-08-07
 
 ## Thread Pool Exhaustion End-to-End Test
 
@@ -73,6 +73,18 @@ Live production-read-only safety check:
 - Incident: `07123af1-423e-4338-9ca4-3fcc0146701c`.
 - The incident completed `DIAGNOSED` with `JVM_THREAD_POOL_EXHAUSTED` while Arthas was intentionally not configured.
 - The persisted tool trace contains `query_arthas_waiting_threads` with status `SUCCEEDED` and summary `Arthas thread inspection is not configured for this service`; no false source evidence was created.
+
+## Production Read-Only Adapter Coverage
+
+Status: PASSED (automated tests; live backend credentials and endpoints are deployment-specific)
+
+The server now has bounded, server-configured read-only adapters for the remaining production evidence sources:
+
+- PostgreSQL: fixed `pg_stat_statements` and `pg_stat_activity` queries return only statement fingerprints, durations, and curated connection groups. The dedicated role is constrained by `pg_read_all_stats`, `default_transaction_read_only`, and a bounded statement timeout.
+- Jaeger Query: fixed service-scoped trace requests return only same-service PostgreSQL, configured downstream, or Redis span durations. Trace IDs, operation names, attributes, tags, and payloads are discarded.
+- Redis: fixed INFO sections include keyspace hit/miss counters; `inspect_redis_cache_hit_rate` produces `REDIS_CACHE_HIT_RATE_LOW` without reading keys or values.
+
+Automated coverage includes URL and credential validation, fixed-query enforcement, response bounds, authentication construction, source filtering, raw-data omission, and Evidence mapping. The production integration guide contains the required database role, Redis ACL, and Jaeger Query configuration.
 
 ## Pending Verification
 

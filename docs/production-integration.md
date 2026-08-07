@@ -91,6 +91,25 @@ faultpilot:
 
 When the target is unavailable, missing `pg_stat_statements`, or lacks the statistics grant, FaultPilot records `DATA_UNAVAILABLE`. It does not convert missing database evidence into a model-only diagnosis. A slow statement fingerprint becomes `SLOW_SQL_FOUND`; a long non-idle connection group becomes `CONNECTION_HOLDING_QUERY_FOUND`. Either result still requires the EvidenceGate's independent latency or pool-pressure corroboration before a cause can be confirmed.
 
+## Redis cache diagnostics
+
+Redis production probes use a separate administrator-configured endpoint and a short-lived diagnostic connection. FaultPilot sends only fixed `AUTH`, optional connection-scoped `SELECT`, `INFO memory`, `INFO stats`, `INFO clients`, and bounded `SLOWLOG GET` requests. It never sends model-generated Redis commands and never reads keys, values, keyspace scans, or cache payloads.
+
+The available cache probes are:
+
+- `inspect_redis_server_info`: curated memory, eviction, client, and blocked-client counters.
+- `inspect_redis_cache_hit_rate`: `keyspace_hits` and `keyspace_misses` converted into a bounded hit-rate observation; a low rate yields `REDIS_CACHE_HIT_RATE_LOW` but is not by itself a confirmed root cause.
+- `inspect_redis_slow_log`: bounded command name, duration, and argument count with all command arguments discarded.
+- Prometheus and Jaeger probes for client-pool pressure, command latency, and trace correlation.
+
+Use an ACL user restricted to the exact read-only commands required by the deployment. For Redis 7, the policy should be reviewed by the Redis administrator; a minimal starting point is:
+
+```text
+ACL SETUSER faultpilot-diagnostic on >${REDIS_DIAGNOSTIC_PASSWORD} ~* +AUTH +SELECT +INFO +SLOWLOG|GET
+```
+
+Do not grant `KEYS`, `SCAN`, `MONITOR`, `CONFIG`, `CLIENT KILL`, `EVAL`, `SCRIPT`, `FLUSH*`, `DEL`, or other write/administrative commands. Keep the password in a secret manager and restrict the diagnostic connection to the internal monitoring network. If the ACL policy rejects a fixed probe, FaultPilot records `DATA_UNAVAILABLE` rather than falling back to a broader command.
+
 ## Jaeger trace correlation
 
 FaultPilot supports a Jaeger Query backend for independent timing corroboration. Business services should export OpenTelemetry-compatible traces to the organization's trace collector, and the Query endpoint should be protected by a service-scoped read-only identity or a reverse proxy. FaultPilot sends a fixed `GET /api/traces` request with only the configured service name, bounded trace count, and bounded lookback window.
@@ -205,8 +224,9 @@ Create an incident with `serviceName` set to `order-service` and a symptom such 
 3. Inspect the incident traces and confirm tool sources start with `prometheus:`, `actuator:`, or `arthas:`.
 4. With a PostgreSQL target configured, inspect tool sources beginning with `postgres:` and confirm that diagnostic summaries expose only statement fingerprints or curated connection-group metadata.
 5. With a Jaeger backend configured, inspect tool sources beginning with `jaeger:` and confirm that summaries expose only category, configured related service, and duration.
-6. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, `SLOW_SQL_FOUND`, `CONNECTION_HOLDING_QUERY_FOUND`, `SLOW_CHILD_SPAN_FOUND`, or `DATA_UNAVAILABLE` is stored.
-7. Confirm the incident ends at `DIAGNOSED` only when the EvidenceGate has the required independent evidence, and that `GET /api/pending-actions/by-incident/{id}` returns an empty list.
-8. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
+6. With Redis configured, confirm the source is `redis:<reference>:...`, no key or value appears in the tool summary, and a low hit rate is recorded only as `REDIS_CACHE_HIT_RATE_LOW`.
+7. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, `SLOW_SQL_FOUND`, `CONNECTION_HOLDING_QUERY_FOUND`, `SLOW_CHILD_SPAN_FOUND`, or `DATA_UNAVAILABLE` is stored.
+8. Confirm the incident ends at `DIAGNOSED` only when the EvidenceGate has the required independent evidence, and that `GET /api/pending-actions/by-incident/{id}` returns an empty list.
+9. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
 
 This mode is intentionally diagnostic-only. A future production remediation integration should use separately authenticated, allowlisted runbook handlers and remain behind the existing human confirmation workflow.

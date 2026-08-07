@@ -8,6 +8,7 @@ import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
 import com.astrayzjt.faultpilot.observability.PostgresDiagnosticsClient;
 import com.astrayzjt.faultpilot.observability.JaegerTraceDiagnosticsClient;
+import com.astrayzjt.faultpilot.observability.RedisDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
 import org.junit.jupiter.api.Test;
@@ -145,6 +146,20 @@ class ProductionDiagnosticToolsConfigurationTest {
 
         assertThat(dependency.evidenceType()).isEqualTo(EvidenceType.SLOW_CHILD_SPAN_FOUND);
         assertThat(redis.evidenceType()).isEqualTo(EvidenceType.REDIS_TRACE_LATENCY_CORRELATED);
+    }
+
+    @Test
+    void mapsLowRedisHitRateToCacheEvidenceWithoutReadingCacheContents() {
+        RedisDiagnosticsClient client = mock(RedisDiagnosticsClient.class);
+        when(client.inspectServer("order-service")).thenReturn(new RedisDiagnosticsClient.ServerInspection(
+                true, true, "redis-primary", Map.of("keyspace_hits", 70L, "keyspace_misses", 30L)));
+        DiagnosticTool<Map<String, Object>> tool = new ProductionDiagnosticToolsConfiguration()
+                .inspectRedisCacheHitRate(client, new ObservabilityProperties());
+
+        var result = tool.execute(Map.of("key", "customer:secret"), context());
+
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.REDIS_CACHE_HIT_RATE_LOW);
+        assertThat(result.data().toString()).contains("hitRate=0.7").doesNotContain("customer:secret");
     }
 
     private ToolExecutionContext context() {

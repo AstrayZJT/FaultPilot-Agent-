@@ -479,6 +479,37 @@ public class ProductionDiagnosticToolsConfiguration {
     }
 
     @Bean
+    DiagnosticTool<Map<String, Object>> inspectRedisCacheHitRate(RedisDiagnosticsClient client,
+                                                                  ObservabilityProperties properties) {
+        return tool("inspect_redis_cache_hit_rate", AgentType.CACHE_AGENT, (service, ignored) -> {
+            RedisDiagnosticsClient.ServerInspection inspection = client.inspectServer(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Redis instance is configured for this service", Map.of("configured", false),
+                        null, "redis:" + service + ":hit-rate");
+            }
+            String source = "redis:" + inspection.redisReference() + ":hit-rate";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured Redis read-only hit-rate probe is unavailable");
+            }
+            long hits = inspection.values().getOrDefault("keyspace_hits", 0L);
+            long misses = inspection.values().getOrDefault("keyspace_misses", 0L);
+            long total = Math.max(0, hits) + Math.max(0, misses);
+            if (total == 0) {
+                return new ToolResult(true, "Redis has not exposed enough keyspace hit/miss activity for a hit-rate decision",
+                        Map.of("redisRef", inspection.redisReference(), "hits", hits, "misses", misses), null, source);
+            }
+            double hitRate = (double) Math.max(0, hits) / total;
+            boolean low = hitRate < properties.getRedisCacheHitRateLowRatio();
+            return new ToolResult(true,
+                    low ? "Redis cache hit rate is below the configured observation threshold" :
+                            "Redis cache hit rate is within the configured observation range",
+                    Map.of("redisRef", inspection.redisReference(), "hits", hits, "misses", misses,
+                            "hitRate", hitRate, "threshold", properties.getRedisCacheHitRateLowRatio()),
+                    low ? EvidenceType.REDIS_CACHE_HIT_RATE_LOW : null, source);
+        });
+    }
+
+    @Bean
     DiagnosticTool<Map<String, Object>> inspectRedisSlowLog(RedisDiagnosticsClient client,
                                                               ObservabilityProperties properties) {
         return tool("inspect_redis_slow_log", AgentType.CACHE_AGENT, (service, ignored) -> {

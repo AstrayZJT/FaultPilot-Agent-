@@ -42,6 +42,7 @@ faultpilot:
     redis-memory-usage-high-ratio: ${REDIS_MEMORY_USAGE_HIGH_RATIO:0.90}
     redis-evictions-high-threshold: ${REDIS_EVICTIONS_HIGH_THRESHOLD:1}
     redis-slow-command-threshold-micros: ${REDIS_SLOW_COMMAND_THRESHOLD_MICROS:10000}
+    redis-cache-hit-rate-low-ratio: ${REDIS_CACHE_HIT_RATE_LOW_RATIO:0.80}
     database-slow-query-threshold-millis: ${DATABASE_SLOW_QUERY_THRESHOLD_MILLIS:1000}
     database-holding-query-threshold-millis: ${DATABASE_HOLDING_QUERY_THRESHOLD_MILLIS:1000}
     trace-slow-span-threshold-millis: ${TRACE_SLOW_SPAN_THRESHOLD_MILLIS:1000}

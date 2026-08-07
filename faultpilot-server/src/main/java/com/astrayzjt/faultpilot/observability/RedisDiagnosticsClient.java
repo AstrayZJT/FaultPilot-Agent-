@@ -32,7 +32,8 @@ public class RedisDiagnosticsClient {
     private static final List<String> INFO_COMMANDS = List.of("memory", "stats", "clients");
     private static final java.util.Set<String> INFO_FIELDS = java.util.Set.of(
             "used_memory", "maxmemory", "mem_fragmentation_ratio", "evicted_keys",
-            "connected_clients", "blocked_clients", "total_commands_processed");
+            "connected_clients", "blocked_clients", "total_commands_processed",
+            "keyspace_hits", "keyspace_misses");
 
     private final ServiceCatalogProperties serviceCatalog;
     private final RedisCatalogProperties redisCatalog;

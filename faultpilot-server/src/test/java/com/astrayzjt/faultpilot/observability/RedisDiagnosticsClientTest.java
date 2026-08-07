@@ -33,7 +33,8 @@ class RedisDiagnosticsClientTest {
             served.get();
             assertThat(serverInspection.available()).isTrue();
             assertThat(serverInspection.values()).containsEntry("used_memory", 1024L)
-                    .containsEntry("evicted_keys", 2L).containsEntry("connected_clients", 3L);
+                    .containsEntry("evicted_keys", 2L).containsEntry("connected_clients", 3L)
+                    .containsEntry("keyspace_hits", 70L).containsEntry("keyspace_misses", 30L);
             assertThat(slowLog.entries()).singleElement().satisfies(entry -> {
                 assertThat(entry.command()).isEqualTo("GET");
                 assertThat(entry.durationMicros()).isEqualTo(20_000L);
@@ -70,7 +71,7 @@ class RedisDiagnosticsClientTest {
             assertThat(readCommand(input)).containsExactly("INFO", "memory");
             writeBulk(output, "used_memory:1024\r\nmaxmemory:2048\r\n");
             assertThat(readCommand(input)).containsExactly("INFO", "stats");
-            writeBulk(output, "evicted_keys:2\r\n");
+            writeBulk(output, "evicted_keys:2\r\nkeyspace_hits:70\r\nkeyspace_misses:30\r\n");
             assertThat(readCommand(input)).containsExactly("INFO", "clients");
             writeBulk(output, "connected_clients:3\r\nblocked_clients:1\r\n");
         }
