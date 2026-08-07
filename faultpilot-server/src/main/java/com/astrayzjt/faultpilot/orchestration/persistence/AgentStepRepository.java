@@ -1,6 +1,9 @@
 package com.astrayzjt.faultpilot.orchestration.persistence;
 
 import com.astrayzjt.faultpilot.common.domain.AgentStepDecision;
+import com.astrayzjt.faultpilot.common.domain.AgentStepAction;
+import com.astrayzjt.faultpilot.common.domain.AgentType;
+import com.astrayzjt.faultpilot.incident.api.InvestigationDetail;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,6 +43,28 @@ public class AgentStepRepository {
                 evidenceId, status, Timestamp.from(Instant.now()), stepId);
     }
 
+    public java.util.List<InvestigationDetail.AgentStepSummary> findStepSummariesByIncident(UUID incidentId) {
+        return jdbcTemplate.query("SELECT step.id AS step_id,step.task_id,task.agent_type,task.investigation_round," +
+                        "step.step_index,step.action,step.tool_name,step.decision_summary,step.status,step.evidence_id," +
+                        "step.started_at,step.completed_at FROM agent_step_run step " +
+                        "JOIN agent_task_run task ON task.id=step.task_id WHERE task.incident_id=? " +
+                        "ORDER BY task.investigation_round,task.started_at NULLS LAST,step.step_index",
+                (rs, row) -> new InvestigationDetail.AgentStepSummary(
+                        rs.getObject("step_id", UUID.class),
+                        rs.getObject("task_id", UUID.class),
+                        AgentType.valueOf(rs.getString("agent_type")),
+                        rs.getInt("investigation_round"),
+                        rs.getInt("step_index"),
+                        AgentStepAction.valueOf(rs.getString("action")),
+                        rs.getString("tool_name"),
+                        rs.getString("decision_summary"),
+                        rs.getString("status"),
+                        rs.getObject("evidence_id", UUID.class),
+                        instant(rs.getTimestamp("started_at")),
+                        instant(rs.getTimestamp("completed_at"))),
+                incidentId);
+    }
+
     private String argumentsHash(AgentStepDecision decision) {
         try {
             return sha256(objectMapper.writeValueAsString(decision.arguments()));
@@ -58,5 +83,9 @@ public class AgentStepRepository {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private Instant instant(Timestamp value) {
+        return value == null ? null : value.toInstant();
     }
 }

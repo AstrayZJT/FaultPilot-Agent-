@@ -62,6 +62,19 @@ public class RemediationService {
         return remediationProperties.isEnabled() && integrationProperties.isLab();
     }
 
+    public boolean canPrepare(DiagnosisDecision decision) {
+        return isEnabled() && actionFor(decision).map(actionCatalog::supports).orElse(false);
+    }
+
+    public String unavailableReason(DiagnosisDecision decision) {
+        if (!isEnabled()) {
+            return "Remediation is disabled outside LAB mode";
+        }
+        return actionFor(decision).isEmpty()
+                ? "No pre-registered LAB remediation action exists for this diagnosis"
+                : "The configured LAB remediation action is unavailable";
+    }
+
     @Transactional
     public PendingAction prepare(UUID incidentId) {
         if (!isEnabled()) {
@@ -70,7 +83,8 @@ public class RemediationService {
         Incident incident = incidentService.find(incidentId).orElseThrow();
         DiagnosisDecision decision = diagnosisRepository.find(incidentId)
                 .filter(value -> value.status() == DiagnosisStatus.CONFIRMED).orElseThrow();
-        ActionCode code = actionFor(decision);
+        ActionCode code = actionFor(decision)
+                .orElseThrow(() -> new IllegalStateException("No pre-registered remediation action exists for this diagnosis"));
         actionCatalog.require(code);
         String key = incidentId + ":" + code;
         Map<String, Object> parameters = Map.of("targetService", incident.snapshot().serviceName());
@@ -176,16 +190,14 @@ public class RemediationService {
         recoverPending();
     }
 
-    private ActionCode actionFor(DiagnosisDecision decision) {
+    private java.util.Optional<ActionCode> actionFor(DiagnosisDecision decision) {
         return switch (decision.primaryCause()) {
-            case JVM_CPU_HOTSPOT -> ActionCode.STOP_CPU_FAULT;
-            case JVM_THREAD_POOL_EXHAUSTED -> ActionCode.RELEASE_BLOCKED_TASKS;
-            case DB_SLOW_QUERY -> ActionCode.RESTORE_INDEXED_QUERY;
-            case DB_POOL_EXHAUSTED -> ActionCode.RELEASE_HELD_CONNECTIONS;
-            case DEPENDENCY_TIMEOUT -> ActionCode.RESTORE_DEPENDENCY_LATENCY;
-            case REDIS_SERVER_LATENCY, REDIS_CLIENT_POOL_EXHAUSTED ->
-                    throw new IllegalArgumentException("No pre-registered remediation action exists for Redis diagnosis");
-            case UNKNOWN -> throw new IllegalArgumentException("No remediation action for unknown cause");
+            case JVM_CPU_HOTSPOT -> java.util.Optional.of(ActionCode.STOP_CPU_FAULT);
+            case JVM_THREAD_POOL_EXHAUSTED -> java.util.Optional.of(ActionCode.RELEASE_BLOCKED_TASKS);
+            case DB_SLOW_QUERY -> java.util.Optional.of(ActionCode.RESTORE_INDEXED_QUERY);
+            case DB_POOL_EXHAUSTED -> java.util.Optional.of(ActionCode.RELEASE_HELD_CONNECTIONS);
+            case DEPENDENCY_TIMEOUT -> java.util.Optional.of(ActionCode.RESTORE_DEPENDENCY_LATENCY);
+            case REDIS_SERVER_LATENCY, REDIS_CLIENT_POOL_EXHAUSTED, UNKNOWN -> java.util.Optional.empty();
         };
     }
 

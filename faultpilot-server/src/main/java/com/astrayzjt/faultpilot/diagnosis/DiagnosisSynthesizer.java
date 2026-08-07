@@ -11,6 +11,7 @@ import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.domain.ProposalStatus;
 import com.astrayzjt.faultpilot.common.domain.RoutingSignal;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
+import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,7 +55,11 @@ public class DiagnosisSynthesizer {
         } catch (RuntimeException exception) {
             String repaired = modelClient.complete(snapshot.incidentId(), null, ModelRole.DIAGNOSIS_SYNTHESIZER,
                     "synthesis-repair-v2", "Return only valid JSON matching the requested diagnosis proposal schema. Do not add commentary.", raw, 1000);
-            return parse(repaired, snapshot.incidentId(), round, revision, evidence);
+            try {
+                return parse(repaired, snapshot.incidentId(), round, revision, evidence);
+            } catch (RuntimeException ignored) {
+                throw new ModelOutputInvalidException(ModelRole.DIAGNOSIS_SYNTHESIZER);
+            }
         }
     }
 

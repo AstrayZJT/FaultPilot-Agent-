@@ -3,6 +3,8 @@ package com.astrayzjt.faultpilot.orchestration.persistence;
 import com.astrayzjt.faultpilot.common.domain.AgentFinding;
 import com.astrayzjt.faultpilot.common.domain.AgentTask;
 import com.astrayzjt.faultpilot.common.domain.AgentTaskStatus;
+import com.astrayzjt.faultpilot.common.domain.AgentType;
+import com.astrayzjt.faultpilot.incident.api.InvestigationDetail;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -56,11 +58,42 @@ public class AgentTaskRepository {
                         "ORDER BY investigation_round, completed_at", (rs, row) -> readFinding(rs.getString("finding_json")), incidentId);
     }
 
+    public List<InvestigationDetail.AgentTaskSummary> findTaskSummariesByIncident(UUID incidentId) {
+        return jdbcTemplate.query("SELECT id,agent_type,objective,status,investigation_round,max_steps,started_at,completed_at," +
+                        "finding_json,error_message FROM agent_task_run WHERE incident_id=? " +
+                        "ORDER BY investigation_round, started_at NULLS LAST, id",
+                (rs, row) -> new InvestigationDetail.AgentTaskSummary(
+                        rs.getObject("id", UUID.class),
+                        AgentType.valueOf(rs.getString("agent_type")),
+                        rs.getString("objective"),
+                        rs.getString("status"),
+                        rs.getInt("investigation_round"),
+                        rs.getInt("max_steps"),
+                        instant(rs.getTimestamp("started_at")),
+                        instant(rs.getTimestamp("completed_at")),
+                        rs.getString("finding_json") == null ? null : readFinding(rs.getString("finding_json")),
+                        safeErrorCode(rs.getString("error_message"))),
+                incidentId);
+    }
+
     private AgentFinding readFinding(String json) throws java.sql.SQLException {
         try {
             return objectMapper.readValue(json, AgentFinding.class);
         } catch (JsonProcessingException exception) {
             throw new java.sql.SQLException("Cannot parse agent finding", exception);
         }
+    }
+
+    private java.time.Instant instant(Timestamp value) {
+        return value == null ? null : value.toInstant();
+    }
+
+    private String safeErrorCode(String errorMessage) {
+        if (errorMessage == null || errorMessage.isBlank()) {
+            return null;
+        }
+        int delimiter = errorMessage.indexOf(':');
+        String value = delimiter > 0 ? errorMessage.substring(0, delimiter) : errorMessage;
+        return value.substring(0, Math.min(80, value.length()));
     }
 }

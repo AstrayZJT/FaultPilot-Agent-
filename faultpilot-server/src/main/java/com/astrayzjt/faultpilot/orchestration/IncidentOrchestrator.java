@@ -21,6 +21,8 @@ import com.astrayzjt.faultpilot.diagnosis.EvidenceGateRepository;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
 import com.astrayzjt.faultpilot.incident.application.IncidentService;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
+import com.astrayzjt.faultpilot.common.model.ModelInteractionException;
+import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.astrayzjt.faultpilot.incident.persistence.IncidentRepository;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentTaskRepository;
 import com.astrayzjt.faultpilot.triage.BaselineCollector;
@@ -151,6 +153,17 @@ public class IncidentOrchestrator {
                         "plannedAgents", List.of(), "outcome", "FOLLOW_UP"), config);
             }
         } catch (RuntimeException exception) {
+            ModelInteractionException modelFailure = findModelFailure(exception);
+            if (modelFailure != null) {
+                incidentService.updateStatus(incidentId, IncidentStatus.INCONCLUSIVE);
+                if (modelFailure instanceof ModelOutputInvalidException invalidOutput) {
+                    eventService.append(incidentId, "MODEL_OUTPUT_INVALID", Map.of("role", invalidOutput.role().name()));
+                }
+                eventService.append(incidentId, "DIAGNOSIS_INCONCLUSIVE", Map.of(
+                        "reason", "A required remote model role was unavailable or returned an invalid constrained response",
+                        "modelFailure", modelFailure.getClass().getSimpleName()));
+                return;
+            }
             incidentService.updateStatus(incidentId, IncidentStatus.FAILED);
             eventService.append(incidentId, "ORCHESTRATION_FAILED",
                     Map.of("error", exception.getClass().getSimpleName(), "message", safeMessage(exception)));
@@ -294,11 +307,13 @@ public class IncidentOrchestrator {
                 "rejectionReasons", gate.rejectionReasons()));
         if (gate.status() == DiagnosisStatus.CONFIRMED || gate.status() == DiagnosisStatus.SUPPORTED) {
             incidentService.updateStatus(state.incidentId(), IncidentStatus.DIAGNOSED);
-            if (gate.status() == DiagnosisStatus.CONFIRMED && incident.snapshot().allowRemediation() && remediationService.isEnabled()) {
+            if (gate.status() == DiagnosisStatus.CONFIRMED && incident.snapshot().allowRemediation()
+                    && remediationService.canPrepare(decision)) {
                 remediationService.prepare(state.incidentId());
             } else if (incident.snapshot().allowRemediation()) {
                 eventService.append(state.incidentId(), "ACTION_SKIPPED", Map.of(
-                        "reason", gate.status() == DiagnosisStatus.SUPPORTED ? "Diagnosis is supported but not confirmed" : "Remediation is disabled outside LAB mode"));
+                        "reason", gate.status() == DiagnosisStatus.SUPPORTED ? "Diagnosis is supported but not confirmed" :
+                                remediationService.unavailableReason(decision)));
             }
             eventService.append(state.incidentId(), "DIAGNOSIS_COMPLETED", decision);
             return Map.of("outcome", "DIAGNOSED", "gateStatus", gate.status().name());
@@ -357,6 +372,17 @@ public class IncidentOrchestrator {
     private String safeMessage(Throwable throwable) {
         String message = throwable.getMessage();
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message.substring(0, Math.min(500, message.length()));
+    }
+
+    private ModelInteractionException findModelFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof ModelInteractionException modelFailure) {
+                return modelFailure;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private int maxSteps(AgentType type) {

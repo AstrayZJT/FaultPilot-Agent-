@@ -11,6 +11,7 @@ import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
+import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,7 +50,11 @@ public class DiagnosisCritic {
         } catch (RuntimeException exception) {
             String repaired = modelClient.complete(snapshot.incidentId(), null, ModelRole.CRITIC,
                     "review-repair-v2", "Return only valid JSON matching the requested critique schema. Do not add commentary.", raw, 900);
-            return parse(repaired, proposal.proposalId(), evidence);
+            try {
+                return parse(repaired, proposal.proposalId(), evidence);
+            } catch (RuntimeException ignored) {
+                throw new ModelOutputInvalidException(ModelRole.CRITIC);
+            }
         }
     }
 

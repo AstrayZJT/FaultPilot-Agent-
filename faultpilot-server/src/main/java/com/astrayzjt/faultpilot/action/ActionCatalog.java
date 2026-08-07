@@ -29,4 +29,8 @@ public class ActionCatalog {
         }
         return action;
     }
+
+    public boolean supports(ActionCode code) {
+        return actions.containsKey(code);
+    }
 }

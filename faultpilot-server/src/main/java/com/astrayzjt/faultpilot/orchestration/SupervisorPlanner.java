@@ -8,6 +8,7 @@ import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.domain.AgentFinding;
 import com.astrayzjt.faultpilot.common.domain.DiagnosisCritique;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
+import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,7 +53,11 @@ public class SupervisorPlanner {
         } catch (RuntimeException exception) {
             String repaired = modelClient.complete(snapshot.incidentId(), null, ModelRole.SUPERVISOR,
                     "plan-repair-v2", "Return only a valid JSON object matching the requested InvestigationPlan schema. Do not add commentary.", raw, 600);
-            return parse(repaired);
+            try {
+                return parse(repaired);
+            } catch (RuntimeException ignored) {
+                throw new ModelOutputInvalidException(ModelRole.SUPERVISOR);
+            }
         }
     }
 

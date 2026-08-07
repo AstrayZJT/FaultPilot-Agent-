@@ -10,6 +10,7 @@ import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
+import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentStepRepository;
 import com.astrayzjt.faultpilot.orchestration.persistence.TraceRepository;
@@ -106,7 +107,11 @@ public class SpecialistAgentRunner {
                     task.agentType().name().toLowerCase() + "-step-repair-v2",
                     "Return only a valid JSON object matching the requested AgentStepDecision schema. Do not add commentary.",
                     raw, 500);
-            return parseDecision(repaired);
+            try {
+                return parseDecision(repaired);
+            } catch (RuntimeException ignored) {
+                throw new ModelOutputInvalidException(ModelRole.SPECIALIST);
+            }
         }
     }
 
@@ -158,7 +163,11 @@ public class SpecialistAgentRunner {
                     task.agentType().name().toLowerCase() + "-finding-repair-v2",
                     "Return only a valid JSON object matching the requested specialist finding schema. Do not add commentary.",
                     raw, 800);
-            return parseFinding(task, repaired, evidence, stepsUsed);
+            try {
+                return parseFinding(task, repaired, evidence, stepsUsed);
+            } catch (RuntimeException ignored) {
+                throw new ModelOutputInvalidException(ModelRole.SPECIALIST);
+            }
         }
     }
 
