@@ -5,6 +5,8 @@ import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.RoutingSignal;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
+import com.astrayzjt.faultpilot.common.domain.AgentFinding;
+import com.astrayzjt.faultpilot.common.domain.DiagnosisCritique;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -28,14 +30,21 @@ public class SupervisorPlanner {
     }
 
     public InvestigationPlan plan(IncidentSnapshot snapshot, List<Evidence> evidence, int round) {
-        return plan(snapshot, evidence, List.of(), round);
+        return plan(snapshot, evidence, List.of(), List.of(), null, round);
     }
 
     public InvestigationPlan plan(IncidentSnapshot snapshot, List<Evidence> evidence, List<RoutingSignal> routingSignals, int round) {
+        return plan(snapshot, evidence, routingSignals, List.of(), null, round);
+    }
+
+    public InvestigationPlan plan(IncidentSnapshot snapshot, List<Evidence> evidence, List<RoutingSignal> routingSignals,
+                                  List<AgentFinding> findings, DiagnosisCritique latestCritique, int round) {
         String system = "You are FaultPilot Supervisor. Select only JVM_AGENT, DATABASE_AGENT, DEPENDENCY_AGENT, or " +
                 "CACHE_AGENT. Return JSON only: {\"tasks\":[{\"agentType\":\"...\",\"objective\":\"...\",\"evidenceIds\":[]}],\"reason\":\"...\"}. " +
-                "Choose the smallest useful set, at most 3 tasks. Never invent an evidence ID.";
+                "Choose the smallest useful set, normally one task. In round 2, create only targeted follow-up tasks " +
+                "for missing or contradictory evidence. Never invent an evidence ID or fan out to all agents without evidence.";
         String user = "round=" + round + "\nsnapshot=" + json(snapshot) + "\nroutingSignals=" + json(routingSignals) + "\nevidence=" + json(evidence);
+        user += "\nagentFindings=" + json(findings) + "\nlatestCritique=" + json(latestCritique);
         String raw = modelClient.complete(snapshot.incidentId(), null, ModelRole.SUPERVISOR,
                 "plan-v2", system, user, 600);
         try {

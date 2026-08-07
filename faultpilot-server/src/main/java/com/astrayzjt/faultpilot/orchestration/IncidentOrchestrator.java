@@ -12,6 +12,12 @@ import com.astrayzjt.faultpilot.common.domain.Incident;
 import com.astrayzjt.faultpilot.common.domain.IncidentStatus;
 import com.astrayzjt.faultpilot.diagnosis.DiagnosisPolicy;
 import com.astrayzjt.faultpilot.diagnosis.DiagnosisRepository;
+import com.astrayzjt.faultpilot.diagnosis.DiagnosisCritic;
+import com.astrayzjt.faultpilot.diagnosis.DiagnosisCritiqueRepository;
+import com.astrayzjt.faultpilot.diagnosis.DiagnosisProposalRepository;
+import com.astrayzjt.faultpilot.diagnosis.DiagnosisSynthesizer;
+import com.astrayzjt.faultpilot.diagnosis.EvidenceGate;
+import com.astrayzjt.faultpilot.diagnosis.EvidenceGateRepository;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
 import com.astrayzjt.faultpilot.incident.application.IncidentService;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
@@ -64,6 +70,12 @@ public class IncidentOrchestrator {
     private final EvidenceService evidenceService;
     private final BaselineCollector baselineCollector;
     private final RoutingAdvisor routingAdvisor;
+    private final DiagnosisSynthesizer diagnosisSynthesizer;
+    private final DiagnosisCritic diagnosisCritic;
+    private final EvidenceGate evidenceGate;
+    private final DiagnosisProposalRepository proposalRepository;
+    private final DiagnosisCritiqueRepository critiqueRepository;
+    private final EvidenceGateRepository gateRepository;
     private final DiagnosisPolicy diagnosisPolicy;
     private final DiagnosisRepository diagnosisRepository;
     private final IncidentEventService eventService;
@@ -76,6 +88,9 @@ public class IncidentOrchestrator {
                                 SupervisorPlanner planner, PlanValidator planValidator, List<SpecialistAgent> agents,
                                 AgentTaskRepository taskRepository, EvidenceService evidenceService,
                                 BaselineCollector baselineCollector, RoutingAdvisor routingAdvisor,
+                                DiagnosisSynthesizer diagnosisSynthesizer, DiagnosisCritic diagnosisCritic,
+                                EvidenceGate evidenceGate, DiagnosisProposalRepository proposalRepository,
+                                DiagnosisCritiqueRepository critiqueRepository, EvidenceGateRepository gateRepository,
                                 DiagnosisPolicy diagnosisPolicy, DiagnosisRepository diagnosisRepository,
                                 IncidentEventService eventService, RemediationService remediationService, DataSource dataSource,
                                 @Qualifier("orchestratorExecutor") Executor orchestratorExecutor,
@@ -91,6 +106,12 @@ public class IncidentOrchestrator {
         this.evidenceService = evidenceService;
         this.baselineCollector = baselineCollector;
         this.routingAdvisor = routingAdvisor;
+        this.diagnosisSynthesizer = diagnosisSynthesizer;
+        this.diagnosisCritic = diagnosisCritic;
+        this.evidenceGate = evidenceGate;
+        this.proposalRepository = proposalRepository;
+        this.critiqueRepository = critiqueRepository;
+        this.gateRepository = gateRepository;
         this.diagnosisPolicy = diagnosisPolicy;
         this.diagnosisRepository = diagnosisRepository;
         this.eventService = eventService;
@@ -146,18 +167,31 @@ public class IncidentOrchestrator {
         channels.put("round", Channels.base(() -> 0));
         channels.put("plannedAgents", Channels.base((java.util.function.Supplier<List<String>>) List::of));
         channels.put("outcome", Channels.base(() -> "FOLLOW_UP"));
+        channels.put("proposalId", Channels.base(() -> ""));
+        channels.put("critiqueId", Channels.base(() -> ""));
+        channels.put("revision", Channels.base(() -> 0));
+        channels.put("critiqueVerdict", Channels.base(() -> ""));
+        channels.put("gateStatus", Channels.base(() -> ""));
         StateGraph<IncidentGraphState> stateGraph = new StateGraph<>(channels, serializer);
         stateGraph.addNode("load_incident", node_async(this::loadIncidentNode));
         stateGraph.addNode("collect_baseline", node_async(this::collectBaselineNode));
         stateGraph.addNode("supervisor_plan", node_async(this::supervisorNode));
         stateGraph.addNode("dispatch_agents", node_async(this::dispatchNode));
-        stateGraph.addNode("evaluate_evidence", node_async(this::evaluateNode));
+        stateGraph.addNode("synthesize_diagnosis", node_async(this::synthesizeNode));
+        stateGraph.addNode("critique_diagnosis", node_async(this::critiqueNode));
+        stateGraph.addNode("revise_diagnosis", node_async(this::reviseNode));
+        stateGraph.addNode("evidence_gate", node_async(this::gateNode));
         stateGraph.addEdge(START, "load_incident");
         stateGraph.addEdge("load_incident", "collect_baseline");
         stateGraph.addEdge("collect_baseline", "supervisor_plan");
         stateGraph.addEdge("supervisor_plan", "dispatch_agents");
-        stateGraph.addEdge("dispatch_agents", "evaluate_evidence");
-        stateGraph.addConditionalEdges("evaluate_evidence", edge_async(state ->
+        stateGraph.addEdge("dispatch_agents", "synthesize_diagnosis");
+        stateGraph.addEdge("synthesize_diagnosis", "critique_diagnosis");
+        stateGraph.addConditionalEdges("critique_diagnosis", edge_async(state ->
+                        "REVISE".equals(state.critiqueVerdict()) && state.revision() == 0 ? "revise" : "gate"),
+                Map.of("revise", "revise_diagnosis", "gate", "evidence_gate"));
+        stateGraph.addEdge("revise_diagnosis", "critique_diagnosis");
+        stateGraph.addConditionalEdges("evidence_gate", edge_async(state ->
                         "FOLLOW_UP".equals(state.outcome()) && state.round() < MAX_ROUNDS ? "follow_up" : "done"),
                 Map.of("follow_up", "supervisor_plan", "done", END));
         return stateGraph.compile(CompileConfig.builder().checkpointSaver(saver).releaseThread(false)
@@ -176,8 +210,10 @@ public class IncidentOrchestrator {
         Incident incident = incidentService.find(state.incidentId()).orElseThrow();
         int round = state.round() + 1;
         List<com.astrayzjt.faultpilot.common.domain.Evidence> evidence = evidenceService.findByIncident(state.incidentId());
+        List<AgentFinding> findings = taskRepository.findFindingsByIncident(state.incidentId());
+        com.astrayzjt.faultpilot.common.domain.DiagnosisCritique latestCritique = latestCritique(state.incidentId());
         InvestigationPlan plan = planValidator.validate(
-                planner.plan(incident.snapshot(), evidence, routingAdvisor.derive(evidence), round), evidence);
+                planner.plan(incident.snapshot(), evidence, routingAdvisor.derive(evidence), findings, latestCritique, round), evidence);
         List<String> plannedAgents = plan.tasks().stream().map(task -> task.agentType().name()).toList();
         eventService.append(state.incidentId(), "INVESTIGATION_PLANNED",
                 Map.of("round", round, "agents", plannedAgents, "reason", plan.reason()));
@@ -206,31 +242,89 @@ public class IncidentOrchestrator {
         return Map.of("outcome", "EVALUATING");
     }
 
-    private Map<String, Object> evaluateNode(IncidentGraphState state) {
-        DiagnosisDecision decision = diagnosisPolicy.evaluate(evidenceService.findByIncident(state.incidentId()));
+    private Map<String, Object> synthesizeNode(IncidentGraphState state) {
+        Incident incident = incidentService.find(state.incidentId()).orElseThrow();
+        List<com.astrayzjt.faultpilot.common.domain.Evidence> evidence = evidenceService.findByIncident(state.incidentId());
+        var proposal = diagnosisSynthesizer.propose(incident.snapshot(), evidence,
+                taskRepository.findFindingsByIncident(state.incidentId()), routingAdvisor.derive(evidence),
+                state.round(), 0, null);
+        proposalRepository.save(proposal);
+        eventService.append(state.incidentId(), "DIAGNOSIS_PROPOSED", Map.of(
+                "proposalId", proposal.proposalId().toString(), "status", proposal.status(),
+                "primaryCause", proposal.primaryCause(), "supportingEvidenceIds", proposal.supportingEvidenceIds()));
+        return Map.of("proposalId", proposal.proposalId().toString(), "revision", proposal.revision(), "outcome", "CRITIQUING");
+    }
+
+    private Map<String, Object> critiqueNode(IncidentGraphState state) {
+        Incident incident = incidentService.find(state.incidentId()).orElseThrow();
+        var proposal = proposalRepository.find(state.proposalId()).orElseThrow();
+        var critique = diagnosisCritic.review(incident.snapshot(), proposal,
+                evidenceService.findByIncident(state.incidentId()), taskRepository.findFindingsByIncident(state.incidentId()));
+        critiqueRepository.save(critique);
+        eventService.append(state.incidentId(), "DIAGNOSIS_CRITIQUED", Map.of(
+                "proposalId", proposal.proposalId().toString(), "critiqueId", critique.critiqueId().toString(),
+                "verdict", critique.verdict(), "issues", critique.issues()));
+        return Map.of("critiqueId", critique.critiqueId().toString(), "critiqueVerdict", critique.verdict().name(), "outcome", "GATING");
+    }
+
+    private Map<String, Object> reviseNode(IncidentGraphState state) {
+        Incident incident = incidentService.find(state.incidentId()).orElseThrow();
+        var previous = proposalRepository.find(state.proposalId()).orElseThrow();
+        var critique = critiqueRepository.find(state.critiqueId()).orElseThrow();
+        var revised = diagnosisSynthesizer.propose(incident.snapshot(), evidenceService.findByIncident(state.incidentId()),
+                taskRepository.findFindingsByIncident(state.incidentId()), routingAdvisor.derive(evidenceService.findByIncident(state.incidentId())),
+                state.round(), previous.revision() + 1, critique);
+        proposalRepository.save(revised);
+        eventService.append(state.incidentId(), "DIAGNOSIS_REVISED", Map.of(
+                "previousProposalId", previous.proposalId().toString(), "proposalId", revised.proposalId().toString(),
+                "revision", revised.revision()));
+        return Map.of("proposalId", revised.proposalId().toString(), "revision", revised.revision(), "outcome", "CRITIQUING");
+    }
+
+    private Map<String, Object> gateNode(IncidentGraphState state) {
+        Incident incident = incidentService.find(state.incidentId()).orElseThrow();
+        var proposal = proposalRepository.find(state.proposalId()).orElseThrow();
+        var critique = critiqueRepository.find(state.critiqueId()).orElseThrow();
+        var gate = evidenceGate.evaluate(proposal, critique, evidenceService.findByIncident(state.incidentId()));
+        gateRepository.save(proposal.proposalId(), critique.critiqueId(), gate);
+        DiagnosisDecision decision = evidenceGate.toDecision(gate, proposal.contributingFactors());
         diagnosisRepository.save(state.incidentId(), decision);
-        if (decision.status() == DiagnosisStatus.CONFIRMED) {
-            Incident incident = incidentService.find(state.incidentId()).orElseThrow();
-            if (incident.snapshot().allowRemediation() && remediationService.isEnabled()) {
+        eventService.append(state.incidentId(), "EVIDENCE_GATE_DECIDED", Map.of(
+                "status", gate.status(), "primaryCause", gate.primaryCause(), "missingEvidenceTypes", gate.missingEvidenceTypes(),
+                "rejectionReasons", gate.rejectionReasons()));
+        if (gate.status() == DiagnosisStatus.CONFIRMED || gate.status() == DiagnosisStatus.SUPPORTED) {
+            incidentService.updateStatus(state.incidentId(), IncidentStatus.DIAGNOSED);
+            if (gate.status() == DiagnosisStatus.CONFIRMED && incident.snapshot().allowRemediation() && remediationService.isEnabled()) {
                 remediationService.prepare(state.incidentId());
-            } else {
-                incidentService.updateStatus(state.incidentId(), IncidentStatus.DIAGNOSED);
-                if (incident.snapshot().allowRemediation()) {
-                    eventService.append(state.incidentId(), "ACTION_SKIPPED",
-                            Map.of("reason", "Remediation is disabled outside LAB mode"));
-                }
+            } else if (incident.snapshot().allowRemediation()) {
+                eventService.append(state.incidentId(), "ACTION_SKIPPED", Map.of(
+                        "reason", gate.status() == DiagnosisStatus.SUPPORTED ? "Diagnosis is supported but not confirmed" : "Remediation is disabled outside LAB mode"));
             }
             eventService.append(state.incidentId(), "DIAGNOSIS_COMPLETED", decision);
-            return Map.of("outcome", "DIAGNOSED");
+            return Map.of("outcome", "DIAGNOSED", "gateStatus", gate.status().name());
         }
-        if (state.round() < MAX_ROUNDS) {
-            eventService.append(state.incidentId(), "FOLLOW_UP_REQUESTED",
-                    Map.of("round", state.round(), "missingEvidence", decision.missingEvidenceTypes()));
-            return Map.of("outcome", "FOLLOW_UP");
+        boolean followUp = state.round() < MAX_ROUNDS && hasFollowUp(proposal, critique, gate);
+        if (followUp) {
+            eventService.append(state.incidentId(), "FOLLOW_UP_REQUESTED", Map.of(
+                    "round", state.round(), "missingEvidence", gate.missingEvidenceTypes(), "reasons", gate.rejectionReasons()));
+            return Map.of("outcome", "FOLLOW_UP", "gateStatus", gate.status().name());
         }
         incidentService.updateStatus(state.incidentId(), IncidentStatus.INCONCLUSIVE);
         eventService.append(state.incidentId(), "DIAGNOSIS_INCONCLUSIVE", decision);
-        return Map.of("outcome", "INCONCLUSIVE");
+        return Map.of("outcome", "INCONCLUSIVE", "gateStatus", gate.status().name());
+    }
+
+    private boolean hasFollowUp(com.astrayzjt.faultpilot.common.domain.DiagnosisProposal proposal,
+                                com.astrayzjt.faultpilot.common.domain.DiagnosisCritique critique,
+                                com.astrayzjt.faultpilot.common.domain.EvidenceGateResult gate) {
+        return !proposal.requestedFollowUps().isEmpty() || critique.issues().stream().anyMatch(issue ->
+                issue.suggestedAgent() != null || !issue.missingEvidenceTypes().isEmpty()) || !gate.missingEvidenceTypes().isEmpty();
+    }
+
+    private com.astrayzjt.faultpilot.common.domain.DiagnosisCritique latestCritique(UUID incidentId) {
+        return proposalRepository.findByIncident(incidentId).stream().reduce((first, second) -> second)
+                .flatMap(proposal -> critiqueRepository.findByProposal(proposal.proposalId()).stream().reduce((first, second) -> second))
+                .orElse(null);
     }
 
     private CompletableFuture<AgentFinding> dispatch(AgentType type, Incident incident, int round) {

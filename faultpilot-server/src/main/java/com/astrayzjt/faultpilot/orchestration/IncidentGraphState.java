@@ -28,4 +28,24 @@ public final class IncidentGraphState extends AgentState {
     public String outcome() {
         return value("outcome", "FOLLOW_UP");
     }
+
+    public UUID proposalId() {
+        return UUID.fromString(value("proposalId", ""));
+    }
+
+    public UUID critiqueId() {
+        return UUID.fromString(value("critiqueId", ""));
+    }
+
+    public int revision() {
+        return ((Number) value("revision", 0)).intValue();
+    }
+
+    public String critiqueVerdict() {
+        return value("critiqueVerdict", "");
+    }
+
+    public String gateStatus() {
+        return value("gateStatus", "");
+    }
 }

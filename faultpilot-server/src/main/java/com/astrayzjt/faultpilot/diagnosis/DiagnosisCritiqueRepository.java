@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -35,6 +36,11 @@ public class DiagnosisCritiqueRepository {
     public List<DiagnosisCritique> findByProposal(UUID proposalId) {
         return jdbcTemplate.query("SELECT critique_json FROM diagnosis_critique WHERE proposal_id=? ORDER BY created_at",
                 (rs, row) -> read(rs.getString("critique_json")), proposalId);
+    }
+
+    public Optional<DiagnosisCritique> find(UUID critiqueId) {
+        return jdbcTemplate.query("SELECT critique_json FROM diagnosis_critique WHERE id=?",
+                rs -> rs.next() ? Optional.of(read(rs.getString("critique_json"))) : Optional.empty(), critiqueId);
     }
 
     private DiagnosisCritique read(String json) throws java.sql.SQLException {
