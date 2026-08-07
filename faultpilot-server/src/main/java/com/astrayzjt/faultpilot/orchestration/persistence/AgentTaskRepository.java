@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -48,5 +49,18 @@ public class AgentTaskRepository {
     public void interruptRunning(UUID incidentId) {
         jdbcTemplate.update("UPDATE agent_task_run SET status='INTERRUPTED', completed_at=CURRENT_TIMESTAMP, " +
                 "error_message='Interrupted by service restart' WHERE incident_id=? AND status='RUNNING'", incidentId);
+    }
+
+    public List<AgentFinding> findFindingsByIncident(UUID incidentId) {
+        return jdbcTemplate.query("SELECT finding_json FROM agent_task_run WHERE incident_id=? AND finding_json IS NOT NULL " +
+                        "ORDER BY investigation_round, completed_at", (rs, row) -> readFinding(rs.getString("finding_json")), incidentId);
+    }
+
+    private AgentFinding readFinding(String json) throws java.sql.SQLException {
+        try {
+            return objectMapper.readValue(json, AgentFinding.class);
+        } catch (JsonProcessingException exception) {
+            throw new java.sql.SQLException("Cannot parse agent finding", exception);
+        }
     }
 }

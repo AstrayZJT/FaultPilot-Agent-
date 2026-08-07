@@ -1,0 +1,10 @@
+package com.astrayzjt.faultpilot.common.domain;
+
+public enum CritiqueIssueType {
+    UNSUPPORTED_CLAIM,
+    UNRESOLVED_COUNTER_EVIDENCE,
+    ALTERNATIVE_CAUSE,
+    MISSING_HIGH_VALUE_CHECK,
+    INVALID_EVIDENCE_REFERENCE,
+    UNSAFE_REMEDIATION_CLAIM
+}

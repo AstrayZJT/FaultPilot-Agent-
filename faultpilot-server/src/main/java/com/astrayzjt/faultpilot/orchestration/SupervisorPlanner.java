@@ -3,6 +3,7 @@ package com.astrayzjt.faultpilot.orchestration;
 import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
+import com.astrayzjt.faultpilot.common.domain.RoutingSignal;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,14 +36,18 @@ public class SupervisorPlanner {
     }
 
     public InvestigationPlan plan(IncidentSnapshot snapshot, List<Evidence> evidence, int round) {
+        return plan(snapshot, evidence, List.of(), round);
+    }
+
+    public InvestigationPlan plan(IncidentSnapshot snapshot, List<Evidence> evidence, List<RoutingSignal> routingSignals, int round) {
         ChatModel model = chatModelProvider.getIfAvailable();
         if (model == null) {
             return deterministicPlan(snapshot, round);
         }
-        String system = "You are FaultPilot Supervisor. Select only JVM_AGENT, DATABASE_AGENT, or " +
-                "DEPENDENCY_AGENT. Return JSON only: {\"tasks\":[{\"agentType\":\"...\",\"objective\":\"...\",\"evidenceIds\":[]}],\"reason\":\"...\"}. " +
+        String system = "You are FaultPilot Supervisor. Select only JVM_AGENT, DATABASE_AGENT, DEPENDENCY_AGENT, or " +
+                "CACHE_AGENT. Return JSON only: {\"tasks\":[{\"agentType\":\"...\",\"objective\":\"...\",\"evidenceIds\":[]}],\"reason\":\"...\"}. " +
                 "Choose the smallest useful set, at most 3 tasks. Never invent an evidence ID.";
-        String user = "round=" + round + "\nsnapshot=" + json(snapshot) + "\nevidence=" + json(evidence);
+        String user = "round=" + round + "\nsnapshot=" + json(snapshot) + "\nroutingSignals=" + json(routingSignals) + "\nevidence=" + json(evidence);
         Instant startedAt = Instant.now();
         String raw;
         try {

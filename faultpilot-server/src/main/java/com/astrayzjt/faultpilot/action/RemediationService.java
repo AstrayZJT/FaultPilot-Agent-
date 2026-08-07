@@ -183,6 +183,8 @@ public class RemediationService {
             case DB_SLOW_QUERY -> ActionCode.RESTORE_INDEXED_QUERY;
             case DB_POOL_EXHAUSTED -> ActionCode.RELEASE_HELD_CONNECTIONS;
             case DEPENDENCY_TIMEOUT -> ActionCode.RESTORE_DEPENDENCY_LATENCY;
+            case REDIS_SERVER_LATENCY, REDIS_CLIENT_POOL_EXHAUSTED ->
+                    throw new IllegalArgumentException("No pre-registered remediation action exists for Redis diagnosis");
             case UNKNOWN -> throw new IllegalArgumentException("No remediation action for unknown cause");
         };
     }

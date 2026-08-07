@@ -17,6 +17,8 @@ import com.astrayzjt.faultpilot.incident.application.IncidentService;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
 import com.astrayzjt.faultpilot.incident.persistence.IncidentRepository;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentTaskRepository;
+import com.astrayzjt.faultpilot.triage.BaselineCollector;
+import com.astrayzjt.faultpilot.triage.RoutingAdvisor;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphInput;
@@ -60,6 +62,8 @@ public class IncidentOrchestrator {
     private final Map<AgentType, SpecialistAgent> agents;
     private final AgentTaskRepository taskRepository;
     private final EvidenceService evidenceService;
+    private final BaselineCollector baselineCollector;
+    private final RoutingAdvisor routingAdvisor;
     private final DiagnosisPolicy diagnosisPolicy;
     private final DiagnosisRepository diagnosisRepository;
     private final IncidentEventService eventService;
@@ -71,6 +75,7 @@ public class IncidentOrchestrator {
     public IncidentOrchestrator(IncidentService incidentService, IncidentRepository incidentRepository,
                                 SupervisorPlanner planner, PlanValidator planValidator, List<SpecialistAgent> agents,
                                 AgentTaskRepository taskRepository, EvidenceService evidenceService,
+                                BaselineCollector baselineCollector, RoutingAdvisor routingAdvisor,
                                 DiagnosisPolicy diagnosisPolicy, DiagnosisRepository diagnosisRepository,
                                 IncidentEventService eventService, RemediationService remediationService, DataSource dataSource,
                                 @Qualifier("orchestratorExecutor") Executor orchestratorExecutor,
@@ -84,6 +89,8 @@ public class IncidentOrchestrator {
         this.agents = Map.copyOf(indexed);
         this.taskRepository = taskRepository;
         this.evidenceService = evidenceService;
+        this.baselineCollector = baselineCollector;
+        this.routingAdvisor = routingAdvisor;
         this.diagnosisPolicy = diagnosisPolicy;
         this.diagnosisRepository = diagnosisRepository;
         this.eventService = eventService;
@@ -141,11 +148,13 @@ public class IncidentOrchestrator {
         channels.put("outcome", Channels.base(() -> "FOLLOW_UP"));
         StateGraph<IncidentGraphState> stateGraph = new StateGraph<>(channels, serializer);
         stateGraph.addNode("load_incident", node_async(this::loadIncidentNode));
+        stateGraph.addNode("collect_baseline", node_async(this::collectBaselineNode));
         stateGraph.addNode("supervisor_plan", node_async(this::supervisorNode));
         stateGraph.addNode("dispatch_agents", node_async(this::dispatchNode));
         stateGraph.addNode("evaluate_evidence", node_async(this::evaluateNode));
         stateGraph.addEdge(START, "load_incident");
-        stateGraph.addEdge("load_incident", "supervisor_plan");
+        stateGraph.addEdge("load_incident", "collect_baseline");
+        stateGraph.addEdge("collect_baseline", "supervisor_plan");
         stateGraph.addEdge("supervisor_plan", "dispatch_agents");
         stateGraph.addEdge("dispatch_agents", "evaluate_evidence");
         stateGraph.addConditionalEdges("evaluate_evidence", edge_async(state ->
@@ -166,13 +175,24 @@ public class IncidentOrchestrator {
     private Map<String, Object> supervisorNode(IncidentGraphState state) {
         Incident incident = incidentService.find(state.incidentId()).orElseThrow();
         int round = state.round() + 1;
+        List<com.astrayzjt.faultpilot.common.domain.Evidence> evidence = evidenceService.findByIncident(state.incidentId());
         InvestigationPlan plan = planValidator.validate(
-                planner.plan(incident.snapshot(), evidenceService.findByIncident(state.incidentId()), round),
-                evidenceService.findByIncident(state.incidentId()));
+                planner.plan(incident.snapshot(), evidence, routingAdvisor.derive(evidence), round), evidence);
         List<String> plannedAgents = plan.tasks().stream().map(task -> task.agentType().name()).toList();
         eventService.append(state.incidentId(), "INVESTIGATION_PLANNED",
                 Map.of("round", round, "agents", plannedAgents, "reason", plan.reason()));
         return Map.of("round", round, "plannedAgents", plannedAgents, "outcome", "DISPATCHING");
+    }
+
+    private Map<String, Object> collectBaselineNode(IncidentGraphState state) {
+        Incident incident = incidentService.find(state.incidentId()).orElseThrow();
+        List<com.astrayzjt.faultpilot.common.domain.Evidence> evidence = baselineCollector.collect(incident);
+        eventService.append(state.incidentId(), "BASELINE_COLLECTED", Map.of(
+                "evidenceIds", evidence.stream().map(item -> item.evidenceId().toString()).toList(),
+                "count", evidence.size()));
+        eventService.append(state.incidentId(), "ROUTING_SIGNALS_COMPUTED", Map.of(
+                "signals", routingAdvisor.derive(evidenceService.findByIncident(state.incidentId()))));
+        return Map.of();
     }
 
     private Map<String, Object> dispatchNode(IncidentGraphState state) {
