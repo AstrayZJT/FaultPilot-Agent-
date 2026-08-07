@@ -22,5 +22,9 @@ public class SpecialistAgentConfiguration {
     SpecialistAgent dependencyAgent(SpecialistAgentRunner runner) {
         return new ConfiguredSpecialistAgent(runner, AgentType.DEPENDENCY_AGENT);
     }
-}
 
+    @Bean
+    SpecialistAgent cacheAgent(SpecialistAgentRunner runner) {
+        return new ConfiguredSpecialistAgent(runner, AgentType.CACHE_AGENT);
+    }
+}

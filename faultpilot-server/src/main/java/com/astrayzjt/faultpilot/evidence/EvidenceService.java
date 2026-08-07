@@ -41,6 +41,12 @@ public class EvidenceService {
         return repository.findByIncident(incidentId);
     }
 
+    public void linkTaskEvidence(UUID taskId, UUID evidenceId, String usage) {
+        if (taskId != null && evidenceId != null) {
+            repository.linkTaskEvidence(taskId, evidenceId, usage);
+        }
+    }
+
     private String serialize(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -58,4 +64,3 @@ public class EvidenceService {
         }
     }
 }
-

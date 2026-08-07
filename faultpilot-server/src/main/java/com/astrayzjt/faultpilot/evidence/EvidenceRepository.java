@@ -43,6 +43,11 @@ public class EvidenceRepository {
                 "WHERE incident_id=? ORDER BY collected_at", (rs, row) -> map(rs), incidentId);
     }
 
+    public void linkTaskEvidence(UUID taskId, UUID evidenceId, String usage) {
+        jdbcTemplate.update("INSERT INTO agent_task_evidence_link(task_id,evidence_id,usage) VALUES (?,?,?) " +
+                "ON CONFLICT (task_id,evidence_id,usage) DO NOTHING", taskId, evidenceId, usage);
+    }
+
     private Evidence map(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new Evidence(rs.getObject("id", UUID.class), rs.getObject("incident_id", UUID.class),
                 rs.getObject("producer_task_id", UUID.class), EvidenceType.valueOf(rs.getString("evidence_type")),
@@ -59,4 +64,3 @@ public class EvidenceRepository {
         return timestamp == null ? null : timestamp.toInstant();
     }
 }
-

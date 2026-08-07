@@ -53,7 +53,7 @@ public class IncidentOrchestrator {
 
     private static final int MAX_ROUNDS = 2;
     private static final int DEFAULT_AGENT_MAX_STEPS = 4;
-    private static final int JVM_AGENT_MAX_STEPS = 6;
+    private static final int JVM_AGENT_MAX_STEPS = 4;
 
     private final IncidentService incidentService;
     private final IncidentRepository incidentRepository;
