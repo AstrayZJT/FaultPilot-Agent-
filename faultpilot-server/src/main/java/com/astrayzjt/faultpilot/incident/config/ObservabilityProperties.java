@@ -17,6 +17,7 @@ public class ObservabilityProperties {
     private long redisSlowCommandThresholdMicros = 10_000;
     private long databaseSlowQueryThresholdMillis = 1_000;
     private long databaseHoldingQueryThresholdMillis = 1_000;
+    private long traceSlowSpanThresholdMillis = 1_000;
 
     public String getPrometheusUrl() {
         return prometheusUrl;
@@ -112,5 +113,13 @@ public class ObservabilityProperties {
 
     public void setDatabaseHoldingQueryThresholdMillis(long databaseHoldingQueryThresholdMillis) {
         this.databaseHoldingQueryThresholdMillis = databaseHoldingQueryThresholdMillis;
+    }
+
+    public long getTraceSlowSpanThresholdMillis() {
+        return traceSlowSpanThresholdMillis;
+    }
+
+    public void setTraceSlowSpanThresholdMillis(long traceSlowSpanThresholdMillis) {
+        this.traceSlowSpanThresholdMillis = traceSlowSpanThresholdMillis;
     }
 }

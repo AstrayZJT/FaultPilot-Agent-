@@ -31,7 +31,9 @@ public class ServiceCatalogProperties {
             String arthasBaseUrl,
             String arthasUsername,
             String arthasPassword,
-            List<String> codePackagePrefixes) {
+            List<String> codePackagePrefixes,
+            String traceRef,
+            String traceServiceName) {
 
         public ServiceDefinition(Map<String, String> prometheusLabels,
                                  String actuatorBaseUrl,
@@ -39,7 +41,7 @@ public class ServiceCatalogProperties {
                                  List<String> downstreams,
                                  List<String> allowedActions) {
             this(prometheusLabels, actuatorBaseUrl, databaseRef, null, downstreams, allowedActions,
-                    null, null, null, List.of());
+                    null, null, null, List.of(), null, null);
         }
 
         public ServiceDefinition(Map<String, String> prometheusLabels,
@@ -52,7 +54,21 @@ public class ServiceCatalogProperties {
                                  String arthasPassword,
                                  List<String> codePackagePrefixes) {
             this(prometheusLabels, actuatorBaseUrl, databaseRef, null, downstreams, allowedActions,
-                    arthasBaseUrl, arthasUsername, arthasPassword, codePackagePrefixes);
+                    arthasBaseUrl, arthasUsername, arthasPassword, codePackagePrefixes, null, null);
+        }
+
+        public ServiceDefinition(Map<String, String> prometheusLabels,
+                                 String actuatorBaseUrl,
+                                 String databaseRef,
+                                 String redisRef,
+                                 List<String> downstreams,
+                                 List<String> allowedActions,
+                                 String arthasBaseUrl,
+                                 String arthasUsername,
+                                 String arthasPassword,
+                                 List<String> codePackagePrefixes) {
+            this(prometheusLabels, actuatorBaseUrl, databaseRef, redisRef, downstreams, allowedActions,
+                    arthasBaseUrl, arthasUsername, arthasPassword, codePackagePrefixes, null, null);
         }
 
         @ConstructorBinding
@@ -64,6 +80,8 @@ public class ServiceCatalogProperties {
             arthasBaseUrl = normalize(arthasBaseUrl);
             arthasUsername = normalize(arthasUsername);
             arthasPassword = normalize(arthasPassword);
+            traceRef = normalize(traceRef);
+            traceServiceName = normalize(traceServiceName);
             codePackagePrefixes = codePackagePrefixes == null ? List.of() : codePackagePrefixes.stream()
                     .map(ServiceDefinition::normalize)
                     .filter(java.util.Objects::nonNull)
@@ -81,6 +99,14 @@ public class ServiceCatalogProperties {
 
         public boolean hasRedisConfiguration() {
             return redisRef != null;
+        }
+
+        public boolean hasTraceConfiguration() {
+            return traceRef != null;
+        }
+
+        public String traceServiceNameOrDefault(String serviceName) {
+            return traceServiceName == null ? serviceName : traceServiceName;
         }
 
         private static String normalize(String value) {

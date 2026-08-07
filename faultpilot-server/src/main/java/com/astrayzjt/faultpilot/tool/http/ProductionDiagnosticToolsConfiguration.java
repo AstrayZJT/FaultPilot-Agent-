@@ -6,11 +6,13 @@ import com.astrayzjt.faultpilot.incident.config.DatabaseCatalogProperties;
 import com.astrayzjt.faultpilot.incident.config.ObservabilityProperties;
 import com.astrayzjt.faultpilot.incident.config.RedisCatalogProperties;
 import com.astrayzjt.faultpilot.incident.config.ServiceCatalogProperties;
+import com.astrayzjt.faultpilot.incident.config.TraceCatalogProperties;
 import com.astrayzjt.faultpilot.observability.ActuatorClient;
 import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
 import com.astrayzjt.faultpilot.observability.PostgresDiagnosticsClient;
+import com.astrayzjt.faultpilot.observability.JaegerTraceDiagnosticsClient;
 import com.astrayzjt.faultpilot.observability.RedisDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
@@ -58,6 +60,14 @@ public class ProductionDiagnosticToolsConfiguration {
     PostgresDiagnosticsClient postgresDiagnosticsClient(ServiceCatalogProperties serviceCatalog,
                                                         DatabaseCatalogProperties databaseCatalog) {
         return new PostgresDiagnosticsClient(serviceCatalog, databaseCatalog);
+    }
+
+    @Bean
+    JaegerTraceDiagnosticsClient jaegerTraceDiagnosticsClient(ServiceCatalogProperties serviceCatalog,
+                                                              TraceCatalogProperties traceCatalog,
+                                                              ObservabilityProperties observabilityProperties,
+                                                              com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        return new JaegerTraceDiagnosticsClient(serviceCatalog, traceCatalog, observabilityProperties, objectMapper);
     }
 
     @Bean
@@ -262,6 +272,81 @@ public class ProductionDiagnosticToolsConfiguration {
                             "thresholdMillis", properties.getDatabaseHoldingQueryThresholdMillis(),
                             "holders", holdingConnections.stream().map(PostgresDiagnosticsClient.ConnectionHolder::asEvidenceData).toList()),
                     holdingConnections.isEmpty() ? null : EvidenceType.CONNECTION_HOLDING_QUERY_FOUND, source);
+        });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectTraceSlowDatabaseSpans(JaegerTraceDiagnosticsClient client,
+                                                                       ObservabilityProperties properties) {
+        return tool("inspect_trace_slow_database_spans", AgentType.DATABASE_AGENT, (service, ignored) -> {
+            JaegerTraceDiagnosticsClient.TraceInspection inspection = client.inspectSlowDatabaseSpans(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Jaeger trace backend is configured for this service", Map.of("configured", false),
+                        null, "jaeger:" + service + ":postgresql-spans");
+            }
+            String source = "jaeger:" + inspection.traceReference() + ":postgresql-spans";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured Jaeger PostgreSQL span probe is unavailable");
+            }
+            List<JaegerTraceDiagnosticsClient.TraceSpan> spans = inspection.spans().stream()
+                    .filter(span -> span.durationMillis() >= properties.getTraceSlowSpanThresholdMillis())
+                    .toList();
+            return new ToolResult(true,
+                    spans.isEmpty() ? "Jaeger found no PostgreSQL span above the configured duration threshold" :
+                            "Jaeger found " + spans.size() + " slow PostgreSQL span summary record(s) in the service trace window",
+                    Map.of("traceRef", inspection.traceReference(), "thresholdMillis", properties.getTraceSlowSpanThresholdMillis(),
+                            "spans", spans.stream().map(JaegerTraceDiagnosticsClient.TraceSpan::asEvidenceData).toList()),
+                    spans.isEmpty() ? null : EvidenceType.API_AND_SQL_TIME_CORRELATED, source);
+        });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectTraceSlowDependencySpans(JaegerTraceDiagnosticsClient client,
+                                                                         ObservabilityProperties properties) {
+        return tool("inspect_trace_slow_dependency_spans", AgentType.DEPENDENCY_AGENT, (service, ignored) -> {
+            JaegerTraceDiagnosticsClient.TraceInspection inspection = client.inspectSlowDependencySpans(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Jaeger trace backend is configured for this service", Map.of("configured", false),
+                        null, "jaeger:" + service + ":dependency-spans");
+            }
+            String source = "jaeger:" + inspection.traceReference() + ":dependency-spans";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured Jaeger downstream span probe is unavailable");
+            }
+            List<JaegerTraceDiagnosticsClient.TraceSpan> spans = inspection.spans().stream()
+                    .filter(span -> span.durationMillis() >= properties.getTraceSlowSpanThresholdMillis())
+                    .toList();
+            return new ToolResult(true,
+                    spans.isEmpty() ? "Jaeger found no downstream client span above the configured duration threshold" :
+                            "Jaeger found " + spans.size() + " slow downstream client span summary record(s) in the service trace window",
+                    Map.of("traceRef", inspection.traceReference(), "thresholdMillis", properties.getTraceSlowSpanThresholdMillis(),
+                            "spans", spans.stream().map(JaegerTraceDiagnosticsClient.TraceSpan::asEvidenceData).toList()),
+                    spans.isEmpty() ? null : EvidenceType.SLOW_CHILD_SPAN_FOUND, source);
+        });
+    }
+
+    @Bean
+    DiagnosticTool<Map<String, Object>> inspectTraceRedisSpans(JaegerTraceDiagnosticsClient client,
+                                                                ObservabilityProperties properties) {
+        return tool("inspect_trace_redis_spans", AgentType.CACHE_AGENT, (service, ignored) -> {
+            JaegerTraceDiagnosticsClient.TraceInspection inspection = client.inspectRedisSpans(service);
+            if (!inspection.configured()) {
+                return new ToolResult(true, "No Jaeger trace backend is configured for this service", Map.of("configured", false),
+                        null, "jaeger:" + service + ":redis-spans");
+            }
+            String source = "jaeger:" + inspection.traceReference() + ":redis-spans";
+            if (!inspection.available()) {
+                return ToolResult.failure(source, "Configured Jaeger Redis span probe is unavailable");
+            }
+            List<JaegerTraceDiagnosticsClient.TraceSpan> spans = inspection.spans().stream()
+                    .filter(span -> span.durationMillis() >= properties.getTraceSlowSpanThresholdMillis())
+                    .toList();
+            return new ToolResult(true,
+                    spans.isEmpty() ? "Jaeger found no Redis span above the configured duration threshold" :
+                            "Jaeger found " + spans.size() + " slow Redis span summary record(s) in the service trace window",
+                    Map.of("traceRef", inspection.traceReference(), "thresholdMillis", properties.getTraceSlowSpanThresholdMillis(),
+                            "spans", spans.stream().map(JaegerTraceDiagnosticsClient.TraceSpan::asEvidenceData).toList()),
+                    spans.isEmpty() ? null : EvidenceType.REDIS_TRACE_LATENCY_CORRELATED, source);
         });
     }
 

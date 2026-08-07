@@ -44,6 +44,7 @@ faultpilot:
     redis-slow-command-threshold-micros: ${REDIS_SLOW_COMMAND_THRESHOLD_MICROS:10000}
     database-slow-query-threshold-millis: ${DATABASE_SLOW_QUERY_THRESHOLD_MILLIS:1000}
     database-holding-query-threshold-millis: ${DATABASE_HOLDING_QUERY_THRESHOLD_MILLIS:1000}
+    trace-slow-span-threshold-millis: ${TRACE_SLOW_SPAN_THRESHOLD_MILLIS:1000}
   remediation:
     enabled: ${FAULTPILOT_REMEDIATION_ENABLED:true}
   security:
@@ -71,6 +72,8 @@ faultpilot:
         arthas-password: ${ORDER_SERVICE_ARTHAS_PASSWORD:}
         code-package-prefixes:
           - ${ORDER_SERVICE_CODE_PACKAGE_PREFIX:}
+        trace-ref: ${ORDER_SERVICE_TRACE_REF:}
+        trace-service-name: ${ORDER_SERVICE_TRACE_SERVICE_NAME:order-service}
       inventory-service:
         prometheus-labels:
           job: ${INVENTORY_SERVICE_PROMETHEUS_JOB:faultpilot-lab-inventory}
@@ -84,6 +87,8 @@ faultpilot:
         arthas-password: ${INVENTORY_SERVICE_ARTHAS_PASSWORD:}
         code-package-prefixes:
           - ${INVENTORY_SERVICE_CODE_PACKAGE_PREFIX:}
+        trace-ref: ${INVENTORY_SERVICE_TRACE_REF:}
+        trace-service-name: ${INVENTORY_SERVICE_TRACE_SERVICE_NAME:inventory-service}
   redis:
     instances:
       lab-redis:

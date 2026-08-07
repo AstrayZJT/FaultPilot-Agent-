@@ -7,6 +7,7 @@ import com.astrayzjt.faultpilot.observability.ArthasClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient;
 import com.astrayzjt.faultpilot.observability.PrometheusClient.Sample;
 import com.astrayzjt.faultpilot.observability.PostgresDiagnosticsClient;
+import com.astrayzjt.faultpilot.observability.JaegerTraceDiagnosticsClient;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
 import com.astrayzjt.faultpilot.tool.registry.ToolExecutionContext;
 import org.junit.jupiter.api.Test;
@@ -108,6 +109,42 @@ class ProductionDiagnosticToolsConfigurationTest {
 
         assertThat(result.evidenceType()).isEqualTo(EvidenceType.CONNECTION_HOLDING_QUERY_FOUND);
         assertThat(result.data().toString()).contains("longestAgeMillis=5000");
+    }
+
+    @Test
+    void mapsCuratedTraceDatabaseSpanToCorrelationEvidence() {
+        JaegerTraceDiagnosticsClient client = mock(JaegerTraceDiagnosticsClient.class);
+        JaegerTraceDiagnosticsClient.TraceSpan span = new JaegerTraceDiagnosticsClient.TraceSpan(
+                "POSTGRESQL", 1_500, "postgresql");
+        when(client.inspectSlowDatabaseSpans("order-service")).thenReturn(
+                new JaegerTraceDiagnosticsClient.TraceInspection(true, true, "primary", List.of(span)));
+        DiagnosticTool<Map<String, Object>> tool = new ProductionDiagnosticToolsConfiguration()
+                .inspectTraceSlowDatabaseSpans(client, new ObservabilityProperties());
+
+        var result = tool.execute(Map.of("url", "http://untrusted"), context());
+
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.API_AND_SQL_TIME_CORRELATED);
+        assertThat(result.data().toString()).doesNotContain("http://untrusted");
+    }
+
+    @Test
+    void mapsCuratedTraceDependencyAndRedisSpansToEvidence() {
+        JaegerTraceDiagnosticsClient client = mock(JaegerTraceDiagnosticsClient.class);
+        when(client.inspectSlowDependencySpans("order-service")).thenReturn(
+                new JaegerTraceDiagnosticsClient.TraceInspection(true, true, "primary", List.of(
+                        new JaegerTraceDiagnosticsClient.TraceSpan("DEPENDENCY", 1_500, "inventory-service"))));
+        when(client.inspectRedisSpans("order-service")).thenReturn(
+                new JaegerTraceDiagnosticsClient.TraceInspection(true, true, "primary", List.of(
+                        new JaegerTraceDiagnosticsClient.TraceSpan("REDIS", 1_500, "redis"))));
+        ProductionDiagnosticToolsConfiguration configuration = new ProductionDiagnosticToolsConfiguration();
+
+        var dependency = configuration.inspectTraceSlowDependencySpans(client, new ObservabilityProperties())
+                .execute(Map.of(), context());
+        var redis = configuration.inspectTraceRedisSpans(client, new ObservabilityProperties())
+                .execute(Map.of(), context());
+
+        assertThat(dependency.evidenceType()).isEqualTo(EvidenceType.SLOW_CHILD_SPAN_FOUND);
+        assertThat(redis.evidenceType()).isEqualTo(EvidenceType.REDIS_TRACE_LATENCY_CORRELATED);
     }
 
     private ToolExecutionContext context() {

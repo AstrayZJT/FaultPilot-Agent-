@@ -11,7 +11,8 @@ Business service
   -> Prometheus scrape target
   -> optional authenticated Arthas HTTP API
   -> optional PostgreSQL statistics role
-  -> FaultPilot Prometheus, Actuator, Arthas, and PostgreSQL read-only tools
+  -> optional Jaeger Query backend
+  -> FaultPilot Prometheus, Actuator, Arthas, PostgreSQL, and trace read-only tools
   -> Qwen Supervisor and specialist Agents
   -> Evidence-backed Diagnosis
 ```
@@ -90,6 +91,44 @@ faultpilot:
 
 When the target is unavailable, missing `pg_stat_statements`, or lacks the statistics grant, FaultPilot records `DATA_UNAVAILABLE`. It does not convert missing database evidence into a model-only diagnosis. A slow statement fingerprint becomes `SLOW_SQL_FOUND`; a long non-idle connection group becomes `CONNECTION_HOLDING_QUERY_FOUND`. Either result still requires the EvidenceGate's independent latency or pool-pressure corroboration before a cause can be confirmed.
 
+## Jaeger trace correlation
+
+FaultPilot supports a Jaeger Query backend for independent timing corroboration. Business services should export OpenTelemetry-compatible traces to the organization's trace collector, and the Query endpoint should be protected by a service-scoped read-only identity or a reverse proxy. FaultPilot sends a fixed `GET /api/traces` request with only the configured service name, bounded trace count, and bounded lookback window.
+
+The model cannot provide an endpoint, query string, trace ID, span ID, service name, or tag selector. FaultPilot discards operation names, request paths, attributes, tag values, trace IDs, span IDs, and payloads before persisting evidence. It retains only a bounded summary: category, configured related service, and duration.
+
+Configure the Jaeger backend and logical-to-trace service name mapping in server-side configuration. Keep any token or basic-auth password in a secret manager:
+
+```yaml
+faultpilot:
+  catalog:
+    services:
+      order-service:
+        trace-ref: jaeger-primary
+        trace-service-name: orders-api
+        downstreams:
+          - inventory-service
+      inventory-service:
+        trace-service-name: inventory-api
+  trace:
+    jaeger:
+      jaeger-primary:
+        base-url: https://jaeger-query.internal
+        bearer-token: ${JAEGER_QUERY_BEARER_TOKEN}
+        lookback-minutes: 15
+        max-traces: 10
+```
+
+`base-url` is restricted to a credential-free HTTP(S) URL. Choose either bearer authentication or basic authentication, never both. The trace window is restricted to 1-60 minutes and the response is restricted to 1-20 traces and 512 KiB.
+
+Three fixed trace probes are available:
+
+- `inspect_trace_slow_database_spans`: only recognizes same-service spans tagged with `db.system=postgresql` and yields `API_AND_SQL_TIME_CORRELATED` when the configured duration threshold is exceeded.
+- `inspect_trace_slow_dependency_spans`: only recognizes same-service client spans whose configured peer is a catalogued downstream and yields `SLOW_CHILD_SPAN_FOUND`.
+- `inspect_trace_redis_spans`: only recognizes same-service spans tagged with `db.system=redis` and yields `REDIS_TRACE_LATENCY_CORRELATED`.
+
+The first two classes of evidence are deliberately corroborating evidence: a database span alone cannot prove a specific SQL statement, and a slow child span alone cannot prove a downstream outage. EvidenceGate requires them alongside the corresponding PostgreSQL or Prometheus signal. Jaeger is currently the supported query adapter; other backends should be connected through a controlled Jaeger Query-compatible gateway rather than exposing a free-form trace API to the model.
+
 ## Business service requirements
 
 The target Spring Boot service should include:
@@ -165,8 +204,9 @@ Create an incident with `serviceName` set to `order-service` and a symptom such 
 2. Create an incident through the console or `POST /api/incidents`.
 3. Inspect the incident traces and confirm tool sources start with `prometheus:`, `actuator:`, or `arthas:`.
 4. With a PostgreSQL target configured, inspect tool sources beginning with `postgres:` and confirm that diagnostic summaries expose only statement fingerprints or curated connection-group metadata.
-5. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, `SLOW_SQL_FOUND`, `CONNECTION_HOLDING_QUERY_FOUND`, or `DATA_UNAVAILABLE` is stored.
-6. Confirm the incident ends at `DIAGNOSED` only when the EvidenceGate has the required independent evidence, and that `GET /api/pending-actions/by-incident/{id}` returns an empty list.
-7. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
+5. With a Jaeger backend configured, inspect tool sources beginning with `jaeger:` and confirm that summaries expose only category, configured related service, and duration.
+6. Confirm evidence such as `PROCESS_CPU_HIGH`, `PROCESS_CPU_NORMAL`, `SLOW_SQL_FOUND`, `CONNECTION_HOLDING_QUERY_FOUND`, `SLOW_CHILD_SPAN_FOUND`, or `DATA_UNAVAILABLE` is stored.
+7. Confirm the incident ends at `DIAGNOSED` only when the EvidenceGate has the required independent evidence, and that `GET /api/pending-actions/by-incident/{id}` returns an empty list.
+8. Stop Prometheus or point `PROMETHEUS_URL` at an unavailable address and confirm the tools return `DATA_UNAVAILABLE`; no model-only diagnosis should be accepted.
 
 This mode is intentionally diagnostic-only. A future production remediation integration should use separately authenticated, allowlisted runbook handlers and remain behind the existing human confirmation workflow.

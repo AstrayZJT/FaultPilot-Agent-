@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
         ServiceCatalogProperties.class,
         DatabaseCatalogProperties.class,
         RedisCatalogProperties.class,
+        TraceCatalogProperties.class,
         IntegrationProperties.class,
         ObservabilityProperties.class,
         RemediationProperties.class
