@@ -45,6 +45,10 @@ public class DiagnosisCritic {
                 "counter evidence, alternative causes, missing high-value checks and unsafe remediation claims. " +
                 "EvidenceGate separately grades corroboration. When a proposal honestly cites a direct signal and " +
                 "marks absent corroboration as missing, do not require a follow-up solely to obtain that corroboration; " +
+                "the user symptom may be vague or incorrect, so prioritize structured Evidence over symptom wording. " +
+                "If a positive anomaly signal belongs to an AgentType with no corresponding completed AgentFinding, " +
+                "return FOLLOW_UP with a MISSING_HIGH_VALUE_CHECK issue and suggest that Agent instead of passing a " +
+                "different cause as complete. " +
                 "PASS it and let EvidenceGate return SUPPORTED. REDIS_SERVER_LATENCY is the catalog umbrella for " +
                 "end-to-end Redis command-path latency, including network or connection delay; normal Redis INFO or " +
                 "SLOWLOG does not contradict REDIS_COMMAND_LATENCY_HIGH. Treat AgentFinding prose without a cited " +

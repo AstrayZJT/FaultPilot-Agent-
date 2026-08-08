@@ -43,7 +43,10 @@ public class SupervisorPlanner {
         String system = "You are FaultPilot Supervisor. Select only JVM_AGENT, DATABASE_AGENT, DEPENDENCY_AGENT, or " +
                 "CACHE_AGENT. Return JSON only: {\"tasks\":[{\"agentType\":\"...\",\"objective\":\"...\",\"evidenceIds\":[]}],\"reason\":\"...\"}. " +
                 "Choose the smallest useful set, normally one task. In round 2, create only targeted follow-up tasks " +
-                "for missing or contradictory evidence. Never invent an evidence ID or fan out to all agents without evidence.";
+                "for missing or contradictory evidence. The user symptom may be vague, incomplete, or wrong; treat it " +
+                "as a weak prior and prioritize positive structured routing signals and direct Evidence over symptom wording. " +
+                "Return at least one task whenever investigation is requested; never return an empty tasks array. " +
+                "Never invent an evidence ID or fan out to all agents without evidence.";
         String user = "round=" + round + "\nsnapshot=" + json(snapshot) + "\nroutingSignals=" + json(routingSignals) + "\nevidence=" + json(evidence);
         user += "\nagentFindings=" + json(findings) + "\nlatestCritique=" + json(latestCritique);
         String raw = modelClient.complete(snapshot.incidentId(), null, ModelRole.SUPERVISOR,
@@ -79,6 +82,9 @@ public class SupervisorPlanner {
                 } catch (IllegalArgumentException ignored) {
                 }
             });
+            if (tasks.isEmpty()) {
+                throw new IllegalArgumentException("Supervisor returned an empty investigation plan");
+            }
             return new InvestigationPlan(tasks, root.path("reason").asText("Model-generated investigation plan"));
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("Supervisor output is not valid JSON", exception);

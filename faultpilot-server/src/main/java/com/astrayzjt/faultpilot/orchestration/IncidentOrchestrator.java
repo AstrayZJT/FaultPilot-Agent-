@@ -298,13 +298,29 @@ public class IncidentOrchestrator {
         Incident incident = incidentService.find(state.incidentId()).orElseThrow();
         var proposal = proposalRepository.find(state.proposalId()).orElseThrow();
         var critique = critiqueRepository.find(state.critiqueId()).orElseThrow();
-        var gate = evidenceGate.evaluate(proposal, critique, evidenceService.findByIncident(state.incidentId()));
+        List<com.astrayzjt.faultpilot.common.domain.Evidence> currentEvidence =
+                evidenceService.findByIncident(state.incidentId());
+        var gate = evidenceGate.evaluate(proposal, critique, currentEvidence);
         gateRepository.save(proposal.proposalId(), critique.critiqueId(), gate);
         DiagnosisDecision decision = evidenceGate.toDecision(gate, proposal.contributingFactors());
         diagnosisRepository.save(state.incidentId(), decision);
         eventService.append(state.incidentId(), "EVIDENCE_GATE_DECIDED", Map.of(
                 "status", gate.status(), "primaryCause", gate.primaryCause(), "missingEvidenceTypes", gate.missingEvidenceTypes(),
                 "rejectionReasons", gate.rejectionReasons()));
+        if (gate.status() == DiagnosisStatus.CONFIRMED || gate.status() == DiagnosisStatus.SUPPORTED) {
+            Set<AgentType> investigatedAgents = taskRepository.findTaskSummariesByIncident(state.incidentId()).stream()
+                    .filter(task -> AgentTaskStatus.SUCCEEDED.name().equals(task.status()))
+                    .map(com.astrayzjt.faultpilot.incident.api.InvestigationDetail.AgentTaskSummary::agentType)
+                    .collect(java.util.stream.Collectors.toSet());
+            List<AgentType> uncoveredAgents = routingAdvisor.uninvestigatedAnomalyAgents(currentEvidence, investigatedAgents);
+            if (!uncoveredAgents.isEmpty() && state.round() < MAX_ROUNDS) {
+                eventService.append(state.incidentId(), "FOLLOW_UP_REQUESTED", Map.of(
+                        "round", state.round(),
+                        "agents", uncoveredAgents,
+                        "reason", "A positive routing signal belongs to an Agent that has not completed an investigation"));
+                return Map.of("outcome", "FOLLOW_UP", "gateStatus", gate.status().name());
+            }
+        }
         if (gate.status() == DiagnosisStatus.CONFIRMED || gate.status() == DiagnosisStatus.SUPPORTED) {
             incidentService.updateStatus(state.incidentId(), IncidentStatus.DIAGNOSED);
             if (gate.status() == DiagnosisStatus.CONFIRMED && incident.snapshot().allowRemediation()

@@ -173,3 +173,18 @@ Status: PASSED
 - Slow-statement detection checks both mean and maximum execution time, preventing intermittent outliers from being hidden by historical averages.
 
 All scenarios above ran with FaultPilot in `PRODUCTION_READ_ONLY`; their inject/recover endpoints belong only to the target lab services. FaultPilot itself performed no remediation. Live Jaeger corroboration and production remediation handlers remain deployment-specific integrations and are intentionally not simulated as production evidence.
+
+## Fuzzy Symptom and Self-Reflection Verification
+
+Status: PASSED (agent routing and bounded self-reflection; final result intentionally inconclusive)
+
+- Scenario run: `d3f01403-925e-4f39-b8fb-d9efb6c1d9ec` with `THREAD_POOL_EXHAUSTED`.
+- Incident: `4a4cc605-6657-4496-b4ea-a4b5ab20da51`.
+- User symptom: `出现了问题` (intentionally vague and without a proposed cause).
+- Baseline evidence included `THREAD_POOL_ACTIVE_AT_MAX`, while process CPU and Redis client-pool evidence were normal.
+- The remote Qwen Supervisor selected only `JVM_AGENT` in round 1. The plan reason explicitly cited the structured thread-pool evidence rather than the symptom wording.
+- The Diagnosis Agent proposed `JVM_THREAD_POOL_EXHAUSTED`; the independent Critic returned `FOLLOW_UP` because the JVM finding lacked a blocking-thread corroboration.
+- Round 2 scheduled only `JVM_AGENT` and persisted a second specialist task. It did not fan out to all Agents.
+- The final result was `INCONCLUSIVE`: Arthas was not configured in the server-side catalog, and a required second-round remote model call was unavailable. The system recorded the missing diagnostic capability and model failure, and did not claim a source method or confirm a root cause from model prose.
+
+This verifies that a caller can report an unknown or incorrect symptom. FaultPilot first uses structured observations, then lets the model Critic request a targeted follow-up, with EvidenceGate enforcing the final confidence boundary.

@@ -242,7 +242,8 @@ public class ProductionDiagnosticToolsConfiguration {
                     .toList();
             return new ToolResult(true,
                     slowStatements.isEmpty() ? "PostgreSQL statement fingerprints are below the configured slow-query threshold" :
-                            "PostgreSQL pg_stat_statements contains " + slowStatements.size() + " slow statement fingerprint(s)",
+                            "PostgreSQL cumulative pg_stat_statements contains " + slowStatements.size()
+                                    + " slow statement fingerprint(s); temporal correlation to this incident is not established",
                     Map.of("databaseRef", inspection.databaseReference(),
                             "thresholdMillis", properties.getDatabaseSlowQueryThresholdMillis(),
                             "statements", slowStatements.stream().map(PostgresDiagnosticsClient.SlowStatement::asEvidenceData).toList()),

@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -21,12 +22,29 @@ public class RoutingAdvisor {
         for (Evidence item : evidence) {
             contribution(item.type()).ifPresent(contribution -> scores
                     .computeIfAbsent(contribution.agentType(), ignored -> new Score(contribution.reasonCode()))
-                    .add(contribution.score(), item.evidenceId()));
+                    .add(contribution.score(), contribution.reasonCode(), item.evidenceId()));
         }
         return scores.entrySet().stream()
                 .map(entry -> new RoutingSignal(entry.getKey(), entry.getValue().score, entry.getValue().evidenceIds,
                         entry.getValue().reasonCode))
                 .sorted(Comparator.comparingInt(RoutingSignal::score).reversed().thenComparing(signal -> signal.agentType().name()))
+                .toList();
+    }
+
+    /**
+     * Finds positive anomaly domains that have not yet received a successful specialist investigation.
+     * This keeps a weak or incorrect user symptom from suppressing a stronger observed signal.
+     */
+    public List<AgentType> uninvestigatedAnomalyAgents(List<Evidence> evidence, Set<AgentType> investigatedAgents) {
+        Set<AgentType> investigated = investigatedAgents == null ? Set.of() : Set.copyOf(investigatedAgents);
+        return evidence.stream()
+                .map(item -> contribution(item.type()))
+                .filter(java.util.Optional::isPresent)
+                .map(java.util.Optional::get)
+                .filter(contribution -> contribution.score() > 0)
+                .map(Contribution::agentType)
+                .filter(agent -> !investigated.contains(agent))
+                .distinct()
                 .toList();
     }
 
@@ -51,16 +69,19 @@ public class RoutingAdvisor {
 
     private static final class Score {
         private int score;
-        private final String reasonCode;
+        private String reasonCode;
         private final List<UUID> evidenceIds = new ArrayList<>();
 
         private Score(String reasonCode) {
             this.reasonCode = reasonCode;
         }
 
-        private void add(int contribution, UUID evidenceId) {
+        private void add(int contribution, String contributionReason, UUID evidenceId) {
             score += contribution;
             evidenceIds.add(evidenceId);
+            if (contribution > 0) {
+                reasonCode = contributionReason;
+            }
         }
     }
 }

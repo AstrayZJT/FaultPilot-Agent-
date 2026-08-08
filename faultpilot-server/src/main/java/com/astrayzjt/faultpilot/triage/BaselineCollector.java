@@ -15,16 +15,19 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @Component
 public class BaselineCollector {
 
     private static final List<BaselineProbe> PROBES = List.of(
-            new BaselineProbe(AgentType.JVM_AGENT, List.of("query_prometheus_process_cpu", "query_jvm_overview")),
-            new BaselineProbe(AgentType.DATABASE_AGENT, List.of("query_prometheus_hikari_pool", "query_database_overview")),
-            new BaselineProbe(AgentType.DEPENDENCY_AGENT, List.of("query_prometheus_downstream_latency", "query_downstream_health")),
-            new BaselineProbe(AgentType.CACHE_AGENT, List.of("query_prometheus_redis_client_pool", "query_cache_overview")));
+            new BaselineProbe(AgentType.JVM_AGENT,
+                    List.of("query_prometheus_process_cpu", "query_prometheus_thread_pool", "query_jvm_overview")),
+            new BaselineProbe(AgentType.DATABASE_AGENT,
+                    List.of("query_prometheus_hikari_pool", "query_database_overview")),
+            new BaselineProbe(AgentType.DEPENDENCY_AGENT,
+                    List.of("query_prometheus_downstream_latency", "query_downstream_health")),
+            new BaselineProbe(AgentType.CACHE_AGENT,
+                    List.of("query_prometheus_redis_client_pool", "query_cache_overview")));
 
     private final ToolRegistry toolRegistry;
     private final EvidenceService evidenceService;
@@ -40,15 +43,17 @@ public class BaselineCollector {
         Instant deadline = Instant.now().plusSeconds(8);
         List<Evidence> recorded = new ArrayList<>();
         for (BaselineProbe probe : PROBES) {
-            Optional<String> name = probe.toolNames().stream().filter(candidate -> toolRegistry.names(probe.owner()).contains(candidate)).findFirst();
-            if (name.isEmpty()) {
-                continue;
-            }
-            ToolResult result = execute(probe.owner(), name.get(), incident, deadline);
-            Evidence evidence = evidenceService.record(incident.incidentId(), null, result,
-                    incident.snapshot().timeRange().start(), incident.snapshot().timeRange().end());
-            if (evidence != null) {
-                recorded.add(evidence);
+            List<String> availableTools = probe.toolNames().stream()
+                    .filter(candidate -> toolRegistry.names(probe.owner()).contains(candidate))
+                    .distinct()
+                    .toList();
+            for (String name : availableTools) {
+                ToolResult result = execute(probe.owner(), name, incident, deadline);
+                Evidence evidence = evidenceService.record(incident.incidentId(), null, result,
+                        incident.snapshot().timeRange().start(), incident.snapshot().timeRange().end());
+                if (evidence != null) {
+                    recorded.add(evidence);
+                }
             }
         }
         return List.copyOf(recorded);
