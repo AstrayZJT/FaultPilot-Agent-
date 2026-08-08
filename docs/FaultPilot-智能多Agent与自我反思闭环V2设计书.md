@@ -110,7 +110,7 @@ flowchart LR
 ```yaml
 faultpilot:
   model:
-    base-url: ${MODEL_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    base-url: ${MODEL_BASE_URL:}
     model-name: ${MODEL_NAME:glm-5}
     api-key: ${QWEN_API_KEY:}
     required: ${FAULTPILOT_REQUIRE_REMOTE_MODEL:true}

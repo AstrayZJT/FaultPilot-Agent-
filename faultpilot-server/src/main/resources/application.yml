@@ -111,7 +111,7 @@ faultpilot:
         query-timeout-seconds: ${DATABASE_DIAGNOSTIC_QUERY_TIMEOUT_SECONDS:3}
         max-rows: ${DATABASE_DIAGNOSTIC_MAX_ROWS:20}
   model:
-    base-url: ${MODEL_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    base-url: ${MODEL_BASE_URL:}
     model-name: ${MODEL_NAME:glm-5}
     api-key: ${QWEN_API_KEY:}
     temperature: ${MODEL_TEMPERATURE:0}

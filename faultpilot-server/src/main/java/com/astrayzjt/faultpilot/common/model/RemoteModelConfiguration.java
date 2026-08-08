@@ -17,7 +17,8 @@ import java.time.Duration;
 public class RemoteModelConfiguration {
 
     @Bean
-    @ConditionalOnExpression("T(org.springframework.util.StringUtils).hasText('${faultpilot.model.api-key:}')")
+    @ConditionalOnExpression("T(org.springframework.util.StringUtils).hasText('${faultpilot.model.api-key:}') " +
+            "&& T(org.springframework.util.StringUtils).hasText('${faultpilot.model.base-url:}')")
     ChatModel remoteChatModel(ModelProperties properties) {
         return OpenAiChatModel.builder()
                 .baseUrl(properties.baseUrl())
@@ -34,7 +35,7 @@ public class RemoteModelConfiguration {
         return args -> {
             if (properties.required() && modelProvider.getIfAvailable() == null) {
                 throw new RemoteModelUnavailableException(
-                        "FAULTPILOT_REQUIRE_REMOTE_MODEL is enabled but QWEN_API_KEY is missing");
+                        "FAULTPILOT_REQUIRE_REMOTE_MODEL is enabled but MODEL_BASE_URL or QWEN_API_KEY is missing");
             }
         };
     }

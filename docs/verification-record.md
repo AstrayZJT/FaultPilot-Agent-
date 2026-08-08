@@ -187,13 +187,16 @@ All scenarios above ran with FaultPilot in `PRODUCTION_READ_ONLY`; their inject/
 
 ## GLM-5 Provider Migration
 
-Status: CONFIGURED (live authorization blocked by the current credential)
+Status: PASSED
 
-- The default OpenAI-compatible provider endpoint is now `https://open.bigmodel.cn/api/paas/v4`, and the default remote model is `glm-5`.
-- Existing deployments keep reading the credential from `QWEN_API_KEY`; no key is stored in application configuration, logs, tests, or Git.
+- The remote model is `glm-5`, reached through a deployment-specific Alibaba Bailian OpenAI-compatible endpoint supplied by `MODEL_BASE_URL`.
+- Existing deployments keep reading the credential from `QWEN_API_KEY`; neither the credential nor the tenant-specific endpoint is stored in tracked configuration, logs, tests, or Git.
 - Provider-specific Java configuration and error text were renamed to generic remote-model terminology so every Supervisor, Specialist, Diagnosis, and Critic role uses the configured GLM client.
-- `mvn -pl faultpilot-server -am test` passes all 51 server tests after the migration.
-- A direct GLM compatibility probe and incident `168c0010-57be-476e-aa01-89894f516ebb` both reached the remote-model path, but the provider returned HTTP 401 for the current environment credential. The incident therefore ended `INCONCLUSIVE` at `SUPERVISOR`; no successful GLM model call is claimed until an authorized GLM key replaces that environment value.
+- A direct compatibility probe returned HTTP 200 with response model `glm-5`; `mvn -pl faultpilot-server -am test` passes all 51 server tests.
+- Scenario run `98c67fd1-d48b-4b7e-962a-a0946603b2b4` reached Prometheus executor values `active=4` and `size=4` before incident creation, avoiding stale-scrape races.
+- Incident `ea9e1100-4634-4ead-8e41-d52ec9f19dbe` used the vague symptom `接口有时会卡住，我不确定是什么原因`. GLM selected only `JVM_AGENT`; the Specialist, Diagnosis, and Critic roles all completed successfully.
+- Evidence included `THREAD_POOL_ACTIVE_AT_MAX` and `BLOCKING_TASK_FOUND`. Arthas retained four WAITING threads, `FaultScenarioManager.lambda$startBlockedTasks$9(FaultScenarioManager.java:276)`, and `java.util.concurrent.locks.LockSupport.park`.
+- The Critic returned `PASS`; EvidenceGate returned `CONFIRMED` with primary cause `JVM_THREAD_POOL_EXHAUSTED`. The controlled fault was recovered after verification.
 
 ## Fuzzy Symptom and Self-Reflection Verification
 
