@@ -26,7 +26,7 @@ public class DiagnosisProposalRepository {
     public void save(DiagnosisProposal proposal) {
         try {
             jdbcTemplate.update("INSERT INTO diagnosis_proposal " +
-                            "(id,incident_id,investigation_round,revision,status,proposal_json,created_at) VALUES (?,?,?,?,?,?,?)",
+                            "(id,incident_id,investigation_round,revision,status,proposal_json,created_at) VALUES (?,?,?,?,?,?::jsonb,?)",
                     proposal.proposalId(), proposal.incidentId(), proposal.investigationRound(), proposal.revision(),
                     proposal.status().name(), objectMapper.writeValueAsString(proposal), Timestamp.from(Instant.now()));
         } catch (JsonProcessingException exception) {

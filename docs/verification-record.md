@@ -1,6 +1,6 @@
 # FaultPilot Verification Record
 
-Last updated: 2026-08-07
+Last updated: 2026-08-08
 
 ## Thread Pool Exhaustion End-to-End Test
 
@@ -86,9 +86,35 @@ The server now has bounded, server-configured read-only adapters for the remaini
 
 Automated coverage includes URL and credential validation, fixed-query enforcement, response bounds, authentication construction, source filtering, raw-data omission, and Evidence mapping. The production integration guide contains the required database role, Redis ACL, and Jaeger Query configuration.
 
+## CPU Hotspot Agentic End-to-End Test
+
+Status: PASSED
+
+Runtime and fault signal:
+
+- Scenario: `CPU_HOTSPOT`; scenario run: `b86df16f-bea8-4d64-bf1d-a7ca5a999cf9`.
+- Prometheus observed `process_cpu_usage=0.097677253836796957`, above the configured production-read-only threshold.
+- Arthas was attached on loopback with the restricted command set and produced `CPU_HOT_METHOD_FOUND`.
+- The first application source location was `FaultScenarioManager.lambda$startCpuHotspot$8(FaultScenarioManager.java:257)`.
+
+Agentic result:
+
+- Incident: `a10a077e-6366-4adc-964a-56acbf512159`.
+- Status: `DIAGNOSED`; final gate status: `CONFIRMED`; primary cause: `JVM_CPU_HOTSPOT`.
+- The remote Qwen Supervisor selected `JVM_AGENT`; the specialist collected Prometheus and Arthas evidence.
+- The remote Qwen Diagnosis Agent persisted a `READY_FOR_REVIEW` proposal citing both evidence records.
+- The independent remote Qwen Critic returned `PASS`.
+- EvidenceGate confirmed the cause from `PROCESS_CPU_HIGH` plus `CPU_HOT_METHOD_FOUND`; production read-only mode performed no remediation.
+
+Defects fixed during this verification:
+
+- Specialist, Diagnosis, and Critic parsers now normalize known Qwen enum aliases while dropping malformed or cross-incident evidence IDs.
+- Missing optional arrays and common field aliases no longer invalidate an otherwise safe structured response.
+- Diagnosis proposal, critique, and gate repositories now cast serialized documents to PostgreSQL `jsonb` explicitly.
+- `mvn clean verify` passes with 42 server tests and the complete five-module reactor build.
+
 ## Pending Verification
 
-- CPU hotspot diagnosis in production read-only mode.
 - Slow SQL diagnosis and remediation confirmation in LAB mode.
 - Database connection-pool exhaustion diagnosis and remediation confirmation in LAB mode.
 - Downstream dependency timeout diagnosis and remediation confirmation in LAB mode.

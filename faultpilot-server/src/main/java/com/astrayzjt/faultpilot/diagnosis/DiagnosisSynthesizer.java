@@ -18,10 +18,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 @Service
 public class DiagnosisSynthesizer {
@@ -44,7 +47,9 @@ public class DiagnosisSynthesizer {
                 "counterEvidenceIds, missingEvidenceTypes, requestedFollowUps, causalSummary. " +
                 "Use status READY_FOR_REVIEW only when a plausible causal explanation exists; use INSUFFICIENT or " +
                 "CONTRADICTED when appropriate. requestedFollowUps entries must contain agentType, objective, " +
-                "missingEvidenceTypes and evidenceIds.";
+                "missingEvidenceTypes and evidenceIds. Empty arrays are valid and should be returned explicitly. " +
+                "Allowed status values are READY_FOR_REVIEW, INSUFFICIENT, CONTRADICTED. Allowed primaryCause values are " +
+                java.util.Arrays.toString(CauseCode.values()) + ".";
         String user = "round=" + round + "\nrevision=" + revision + "\nsnapshot=" + json(snapshot) +
                 "\nroutingSignals=" + json(routingSignals) + "\nevidence=" + json(evidence) +
                 "\nagentFindings=" + json(findings) + "\npreviousCritique=" + json(previousCritique);
@@ -53,8 +58,13 @@ public class DiagnosisSynthesizer {
         try {
             return parse(raw, snapshot.incidentId(), round, revision, evidence);
         } catch (RuntimeException exception) {
+            Set<UUID> allowedEvidenceIds = evidence.stream().map(Evidence::evidenceId).collect(java.util.stream.Collectors.toSet());
             String repaired = modelClient.complete(snapshot.incidentId(), null, ModelRole.DIAGNOSIS_SYNTHESIZER,
-                    "synthesis-repair-v2", "Return only valid JSON matching the requested diagnosis proposal schema. Do not add commentary.", raw, 1000);
+                    "synthesis-repair-v2", "Repair the draft into one JSON object only. Use the exact schema and allowed enum " +
+                            "values from the original request. Missing optional arrays must be []. Map a final " +
+                            "CONFIRMED/SUPPORTED diagnosis to READY_FOR_REVIEW because EvidenceGate performs the final " +
+                            "decision. Never invent an evidence ID; only use IDs from AllowedEvidenceIds.",
+                    "Draft=" + raw + "\nAllowedEvidenceIds=" + json(allowedEvidenceIds), 1000);
             try {
                 return parse(repaired, snapshot.incidentId(), round, revision, evidence);
             } catch (RuntimeException ignored) {
@@ -67,70 +77,181 @@ public class DiagnosisSynthesizer {
         try {
             JsonNode node = objectMapper.readTree(extractJson(raw));
             Set<UUID> allowed = evidence.stream().map(Evidence::evidenceId).collect(java.util.stream.Collectors.toSet());
-            ProposalStatus status = ProposalStatus.valueOf(requiredText(node, "status").toUpperCase());
-            CauseCode cause = CauseCode.valueOf(requiredText(node, "primaryCause").toUpperCase());
-            List<UUID> supporting = strictIds(node, "supportingEvidenceIds", allowed);
-            List<UUID> counter = strictIds(node, "counterEvidenceIds", allowed);
-            List<FollowUpRequest> followUps = parseFollowUps(node.path("requestedFollowUps"), allowed);
+            CauseCode cause = causeCode(text(node, "primaryCause", "causeCode", "rootCause", "cause"));
+            ProposalStatus status = proposalStatus(text(node, "status", "diagnosisStatus", "result"));
+            if (cause == CauseCode.UNKNOWN && status == ProposalStatus.READY_FOR_REVIEW) {
+                status = ProposalStatus.INSUFFICIENT;
+            }
+            List<UUID> supporting = allowedIds(node, allowed, "supportingEvidenceIds", "supportingEvidence", "evidenceIds");
+            List<UUID> counter = allowedIds(node, allowed, "counterEvidenceIds", "counterEvidence", "refutingEvidenceIds");
+            List<FollowUpRequest> followUps = parseFollowUps(node, allowed);
             return new DiagnosisProposal(UUID.randomUUID(), incidentId, round, revision, status, cause,
-                    enums(node, "contributingFactors", CauseCode.class), supporting, counter,
-                    enums(node, "missingEvidenceTypes", EvidenceType.class), followUps,
-                    node.path("causalSummary").asText(""));
-        } catch (JsonProcessingException | IllegalArgumentException exception) {
+                    enumValues(node, this::causeCode, "contributingFactors", "contributingCauses"), supporting, counter,
+                    enumValues(node, this::evidenceType, "missingEvidenceTypes", "missingEvidence", "missingChecks"), followUps,
+                    text(node, "causalSummary", "summary", "explanation", "reasoning"));
+        } catch (JsonProcessingException | RuntimeException exception) {
             throw new IllegalArgumentException("Diagnosis Agent output is not a valid proposal", exception);
         }
     }
 
-    private List<FollowUpRequest> parseFollowUps(JsonNode nodes, Set<UUID> allowed) {
-        if (!nodes.isArray()) {
-            throw new IllegalArgumentException("requestedFollowUps must be an array");
+    private List<FollowUpRequest> parseFollowUps(JsonNode node, Set<UUID> allowed) {
+        JsonNode nodes = field(node, "requestedFollowUps", "followUps", "followUpRequests", "nextChecks");
+        if (nodes == null || !nodes.isArray()) {
+            return List.of();
         }
         List<FollowUpRequest> result = new ArrayList<>();
-        nodes.forEach(node -> {
-            AgentType agent = AgentType.valueOf(requiredText(node, "agentType").toUpperCase());
-            String objective = requiredText(node, "objective");
-            List<UUID> ids = strictIds(node, "evidenceIds", allowed);
-            result.add(new FollowUpRequest(agent, objective, enums(node, "missingEvidenceTypes", EvidenceType.class), ids));
-        });
-        return List.copyOf(result);
-    }
-
-    private List<UUID> strictIds(JsonNode node, String name, Set<UUID> allowed) {
-        JsonNode values = node.path(name);
-        if (!values.isArray()) {
-            throw new IllegalArgumentException(name + " must be an array");
-        }
-        List<UUID> result = new ArrayList<>();
-        values.forEach(value -> {
-            try {
-                UUID id = UUID.fromString(value.asText());
-                if (!allowed.contains(id)) {
-                    throw new IllegalArgumentException("Evidence ID is outside this Incident: " + id);
-                }
-                result.add(id);
-            } catch (IllegalArgumentException exception) {
-                throw new IllegalArgumentException("Invalid Evidence ID in " + name, exception);
+        nodes.forEach(followUp -> {
+            AgentType agent = agentType(text(followUp, "agentType", "suggestedAgent", "nextAgent"));
+            String objective = text(followUp, "objective", "reason", "check", "question", "summary");
+            if (agent != null && !objective.isBlank()) {
+                result.add(new FollowUpRequest(agent, objective,
+                        enumValues(followUp, this::evidenceType, "missingEvidenceTypes", "missingChecks", "requiredEvidenceTypes"),
+                        allowedIds(followUp, allowed, "evidenceIds", "supportingEvidenceIds")));
             }
         });
         return List.copyOf(result);
     }
 
-    private <T extends Enum<T>> List<T> enums(JsonNode node, String name, Class<T> type) {
-        JsonNode values = node.path(name);
-        if (!values.isArray()) {
-            throw new IllegalArgumentException(name + " must be an array");
+    private List<UUID> allowedIds(JsonNode node, Set<UUID> allowed, String... names) {
+        LinkedHashSet<UUID> result = new LinkedHashSet<>();
+        for (String name : names) {
+            JsonNode values = field(node, name);
+            if (values == null || values.isNull()) {
+                continue;
+            }
+            if (values.isArray()) {
+                values.forEach(value -> addAllowedId(value, allowed, result));
+            } else {
+                addAllowedId(values, allowed, result);
+            }
         }
-        List<T> result = new ArrayList<>();
-        values.forEach(value -> result.add(Enum.valueOf(type, value.asText().toUpperCase())));
         return List.copyOf(result);
     }
 
-    private String requiredText(JsonNode node, String field) {
-        String value = node.path(field).asText("").trim();
-        if (value.isBlank()) {
-            throw new IllegalArgumentException("Missing proposal field: " + field);
+    private void addAllowedId(JsonNode value, Set<UUID> allowed, Set<UUID> result) {
+        String raw = value != null && value.isObject() ? text(value, "evidenceId", "id") : value == null ? "" : value.asText("");
+        try {
+            UUID id = UUID.fromString(raw.trim());
+            if (allowed.contains(id)) {
+                result.add(id);
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Unknown or malformed model references are deliberately dropped before EvidenceGate.
         }
-        return value;
+    }
+
+    private <T extends Enum<T>> List<T> enumValues(JsonNode node, Function<String, T> parser, String... names) {
+        LinkedHashSet<T> result = new LinkedHashSet<>();
+        for (String name : names) {
+            JsonNode values = field(node, name);
+            if (values == null || values.isNull()) {
+                continue;
+            }
+            if (!values.isArray()) {
+                T parsed = parser.apply(values.asText(""));
+                if (parsed != null) {
+                    result.add(parsed);
+                }
+                continue;
+            }
+            values.forEach(value -> {
+                String raw = value != null && value.isObject() ? text(value, "type", "name", "code") : value.asText("");
+                T parsed = parser.apply(raw);
+                if (parsed != null) {
+                    result.add(parsed);
+                }
+            });
+        }
+        return List.copyOf(result);
+    }
+
+    private ProposalStatus proposalStatus(String raw) {
+        return switch (normalizeEnum(raw)) {
+            case "READY_FOR_REVIEW", "READY", "READY_FOR_DIAGNOSIS", "SUPPORTED", "CONFIRMED", "DIAGNOSED", "SUCCESS" -> ProposalStatus.READY_FOR_REVIEW;
+            case "CONTRADICTED", "CONTRADICTORY", "REJECTED", "REFUTED", "FAILED" -> ProposalStatus.CONTRADICTED;
+            default -> ProposalStatus.INSUFFICIENT;
+        };
+    }
+
+    private CauseCode causeCode(String raw) {
+        String value = normalizeEnum(raw);
+        try {
+            return CauseCode.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return switch (value) {
+                case "CPU_HOTSPOT", "JVM_CPU_HIGH", "JVM_HIGH_CPU", "HIGH_CPU" -> CauseCode.JVM_CPU_HOTSPOT;
+                case "THREAD_POOL_EXHAUSTED", "THREAD_POOL_SATURATION", "JVM_THREAD_POOL_SATURATION" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
+                case "SLOW_SQL", "SQL_SLOW", "SLOW_QUERY", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
+                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED", "CONNECTION_POOL_EXHAUSTED", "DB_POOL_SATURATION" -> CauseCode.DB_POOL_EXHAUSTED;
+                case "DOWNSTREAM_TIMEOUT", "DOWNSTREAM_SLOW", "SERVICE_TIMEOUT", "DEPENDENCY_SLOW" -> CauseCode.DEPENDENCY_TIMEOUT;
+                case "REDIS_LATENCY", "REDIS_SERVER_SLOW", "CACHE_SERVER_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
+                case "CACHE_CLIENT_POOL_EXHAUSTED", "REDIS_POOL_EXHAUSTED", "CACHE_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
+                default -> CauseCode.UNKNOWN;
+            };
+        }
+    }
+
+    private EvidenceType evidenceType(String raw) {
+        String value = normalizeEnum(raw);
+        try {
+            return EvidenceType.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return switch (value) {
+                case "CPU_HIGH", "JVM_CPU_HIGH", "PROCESS_CPU_HOT" -> EvidenceType.PROCESS_CPU_HIGH;
+                case "CPU_NORMAL", "JVM_CPU_NORMAL" -> EvidenceType.PROCESS_CPU_NORMAL;
+                case "CPU_HOT_METHOD" -> EvidenceType.CPU_HOT_METHOD_FOUND;
+                case "THREAD_POOL_SATURATED", "THREAD_POOL_EXHAUSTED", "JVM_THREAD_POOL_EXHAUSTED" -> EvidenceType.THREAD_POOL_ACTIVE_AT_MAX;
+                case "THREAD_QUEUE_GROWING", "EXECUTOR_QUEUE_GROWING" -> EvidenceType.THREAD_POOL_QUEUE_GROWING;
+                case "SLOW_QUERY", "SLOW_SQL" -> EvidenceType.SLOW_SQL_FOUND;
+                case "DB_POOL_HIGH", "CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED" -> EvidenceType.DB_POOL_ACTIVE_AT_MAX;
+                case "DOWNSTREAM_TIMEOUT", "DEPENDENCY_LATENCY_HIGH" -> EvidenceType.DOWNSTREAM_LATENCY_HIGH;
+                case "REDIS_LATENCY_HIGH", "CACHE_SERVER_LATENCY" -> EvidenceType.REDIS_COMMAND_LATENCY_HIGH;
+                case "REDIS_LATENCY_NORMAL", "CACHE_SERVER_LATENCY_NORMAL" -> EvidenceType.REDIS_COMMAND_LATENCY_NORMAL;
+                default -> null;
+            };
+        }
+    }
+
+    private AgentType agentType(String raw) {
+        String value = normalizeEnum(raw);
+        return switch (value) {
+            case "JVM", "JVM_AGENT" -> AgentType.JVM_AGENT;
+            case "DATABASE", "DB", "DATABASE_AGENT" -> AgentType.DATABASE_AGENT;
+            case "DEPENDENCY", "DOWNSTREAM", "DEPENDENCY_AGENT" -> AgentType.DEPENDENCY_AGENT;
+            case "CACHE", "REDIS", "CACHE_AGENT" -> AgentType.CACHE_AGENT;
+            default -> null;
+        };
+    }
+
+    private String normalizeEnum(String raw) {
+        return raw == null ? "" : raw.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
+    private JsonNode field(JsonNode node, String... names) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value != null) {
+                return value;
+            }
+        }
+        Iterator<String> fields = node.fieldNames();
+        while (fields.hasNext()) {
+            String actual = fields.next();
+            for (String name : names) {
+                if (actual.equalsIgnoreCase(name)) {
+                    return node.get(actual);
+                }
+            }
+        }
+        return null;
+    }
+
+    private String text(JsonNode node, String... names) {
+        JsonNode value = field(node, names);
+        return value == null || value.isNull() ? "" : value.asText("").trim();
     }
 
     private String extractJson(String raw) {

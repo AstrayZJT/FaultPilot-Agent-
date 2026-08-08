@@ -25,7 +25,7 @@ public class EvidenceGateRepository {
     public UUID save(UUID proposalId, UUID critiqueId, EvidenceGateResult result) {
         UUID id = UUID.randomUUID();
         try {
-            jdbcTemplate.update("INSERT INTO evidence_gate_result (id,proposal_id,critique_id,status,result_json,created_at) VALUES (?,?,?,?,?,?)",
+            jdbcTemplate.update("INSERT INTO evidence_gate_result (id,proposal_id,critique_id,status,result_json,created_at) VALUES (?,?,?,?,?::jsonb,?)",
                     id, proposalId, critiqueId, result.status().name(), objectMapper.writeValueAsString(result), Timestamp.from(Instant.now()));
             return id;
         } catch (JsonProcessingException exception) {

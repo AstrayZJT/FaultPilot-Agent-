@@ -25,7 +25,7 @@ public class DiagnosisCritiqueRepository {
 
     public void save(DiagnosisCritique critique) {
         try {
-            jdbcTemplate.update("INSERT INTO diagnosis_critique (id,proposal_id,verdict,critique_json,created_at) VALUES (?,?,?,?,?)",
+            jdbcTemplate.update("INSERT INTO diagnosis_critique (id,proposal_id,verdict,critique_json,created_at) VALUES (?,?,?,?::jsonb,?)",
                     critique.critiqueId(), critique.proposalId(), critique.verdict().name(),
                     objectMapper.writeValueAsString(critique), Timestamp.from(Instant.now()));
         } catch (JsonProcessingException exception) {

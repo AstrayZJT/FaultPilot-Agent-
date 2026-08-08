@@ -6,12 +6,16 @@ import com.astrayzjt.faultpilot.common.domain.AgentStepAction;
 import com.astrayzjt.faultpilot.common.domain.AgentStepDecision;
 import com.astrayzjt.faultpilot.common.domain.AgentTask;
 import com.astrayzjt.faultpilot.common.domain.AgentType;
+import com.astrayzjt.faultpilot.common.domain.CauseCode;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
+import com.astrayzjt.faultpilot.common.domain.EvidenceType;
+import com.astrayzjt.faultpilot.common.domain.FindingStatus;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
 import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
+import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentStepRepository;
 import com.astrayzjt.faultpilot.orchestration.persistence.TraceRepository;
 import com.astrayzjt.faultpilot.tool.registry.DiagnosticTool;
@@ -41,11 +45,12 @@ public class SpecialistAgentRunner {
     private final ToolInvocationGuard invocationGuard;
     private final AgentStepRepository stepRepository;
     private final TraceRepository traceRepository;
+    private final IncidentEventService eventService;
 
     public SpecialistAgentRunner(ToolRegistry toolRegistry, EvidenceService evidenceService,
                                  ObjectMapper objectMapper, RemoteModelClient modelClient,
                                  ToolInvocationGuard invocationGuard, AgentStepRepository stepRepository,
-                                 TraceRepository traceRepository) {
+                                 TraceRepository traceRepository, IncidentEventService eventService) {
         this.toolRegistry = toolRegistry;
         this.evidenceService = evidenceService;
         this.objectMapper = objectMapper;
@@ -53,6 +58,7 @@ public class SpecialistAgentRunner {
         this.invocationGuard = invocationGuard;
         this.stepRepository = stepRepository;
         this.traceRepository = traceRepository;
+        this.eventService = eventService;
     }
 
     public AgentFinding run(AgentTask task, IncidentSnapshot snapshot, List<Evidence> existingEvidence) {
@@ -61,11 +67,13 @@ public class SpecialistAgentRunner {
         List<Observation> observations = new ArrayList<>();
         Set<String> calledTools = new HashSet<>();
         AgentStepDecision lastDecision = null;
+        int stepsUsed = 0;
         for (int step = 0; step < task.maxSteps(); step++) {
             if (Instant.now().isAfter(deadline)) {
                 break;
             }
             AgentStepDecision decision = decideNext(task, snapshot, collected, observations, calledTools, step);
+            stepsUsed = step + 1;
             lastDecision = decision;
             UUID stepId = stepRepository.recordDecision(task.taskId(), step, decision, "DECIDED");
             if (decision.action() != AgentStepAction.CALL_TOOL) {
@@ -84,7 +92,7 @@ public class SpecialistAgentRunner {
             stepRepository.attachEvidence(stepId, evidenceId, result.success() ? "SUCCEEDED" : "FAILED");
             observations.add(new Observation(decision.toolName(), result.success(), result.summary(), evidenceId));
         }
-        return finish(task, snapshot, collected, observations, lastDecision, task.maxSteps());
+        return finish(task, snapshot, collected, observations, lastDecision, stepsUsed);
     }
 
     private AgentStepDecision decideNext(AgentTask task, IncidentSnapshot snapshot, List<Evidence> evidence,
@@ -159,14 +167,27 @@ public class SpecialistAgentRunner {
         try {
             return parseFinding(task, raw, evidence, stepsUsed);
         } catch (RuntimeException exception) {
+            Set<UUID> allowedEvidenceIds = evidence.stream().map(Evidence::evidenceId)
+                    .collect(java.util.stream.Collectors.toSet());
             String repaired = modelClient.complete(task.incidentId(), task.taskId(), ModelRole.SPECIALIST,
                     task.agentType().name().toLowerCase() + "-finding-repair-v2",
-                    "Return only a valid JSON object matching the requested specialist finding schema. Do not add commentary.",
-                    raw, 800);
+                    "Repair the draft into one JSON object only. Required fields: " +
+                            "status, causeCode, supportingEvidenceIds, counterEvidenceIds, completedChecks, " +
+                            "missingChecks, suggestedAgent, summary. " +
+                            "Allowed status values: " + java.util.Arrays.toString(FindingStatus.values()) + ". " +
+                            "Allowed causeCode values: " + java.util.Arrays.toString(CauseCode.values()) + ". " +
+                            "suggestedAgent must be one of " + java.util.Arrays.toString(AgentType.values()) + " or null. " +
+                            "Evidence ID arrays may contain only IDs from AllowedEvidenceIds. Never invent an ID.",
+                    "Draft=" + raw + "\nAllowedEvidenceIds=" + serialize(allowedEvidenceIds), 800);
             try {
                 return parseFinding(task, repaired, evidence, stepsUsed);
             } catch (RuntimeException ignored) {
-                throw new ModelOutputInvalidException(ModelRole.SPECIALIST);
+                eventService.append(task.incidentId(), "SPECIALIST_OUTPUT_FALLBACK", Map.of(
+                        "taskId", task.taskId().toString(),
+                        "agent", task.agentType().name(),
+                        "evidenceCount", evidence.size(),
+                        "reason", "Both constrained finding responses were invalid"));
+                return safeFallbackFinding(task, evidence, stepsUsed);
             }
         }
     }
@@ -194,20 +215,63 @@ public class SpecialistAgentRunner {
             String json = extractJson(raw);
             JsonNode node = objectMapper.readTree(json);
             Set<UUID> allowedEvidenceIds = evidence.stream().map(Evidence::evidenceId).collect(java.util.stream.Collectors.toSet());
-            List<UUID> supporting = strictIds(node, "supportingEvidenceIds", allowedEvidenceIds);
-            List<UUID> counter = strictIds(node, "counterEvidenceIds", allowedEvidenceIds);
-            return new AgentFinding(task.taskId(), task.agentType(),
-                    enumValue(node, "status", com.astrayzjt.faultpilot.common.domain.FindingStatus.class,
-                            null),
-                    enumValue(node, "causeCode", com.astrayzjt.faultpilot.common.domain.CauseCode.class,
-                            null), supporting, counter,
-                    enums(node, "completedChecks", com.astrayzjt.faultpilot.common.domain.EvidenceType.class),
-                    enums(node, "missingChecks", com.astrayzjt.faultpilot.common.domain.EvidenceType.class),
+            List<UUID> supporting = allowedIds(node, "supportingEvidenceIds", allowedEvidenceIds);
+            List<UUID> counter = allowedIds(node, "counterEvidenceIds", allowedEvidenceIds);
+            FindingStatus status = findingStatus(node.path("status").asText(""));
+            CauseCode causeCode = causeCode(node.path("causeCode").asText(""));
+            if (status == FindingStatus.SUCCEEDED && (causeCode == CauseCode.UNKNOWN || supporting.isEmpty())) {
+                status = FindingStatus.INSUFFICIENT_EVIDENCE;
+            }
+            return new AgentFinding(task.taskId(), task.agentType(), status, causeCode, supporting, counter,
+                    enums(node, "completedChecks", EvidenceType.class),
+                    enums(node, "missingChecks", EvidenceType.class),
                     optionalAgent(node, "suggestedAgent"), node.path("summary").asText(""),
                     List.of(), node.path("handoffReason").asText(""), stepsUsed);
         } catch (Exception exception) {
             throw new IllegalArgumentException("Model output is not a valid specialist Finding", exception);
         }
+    }
+
+    private AgentFinding safeFallbackFinding(AgentTask task, List<Evidence> evidence, int stepsUsed) {
+        List<EvidenceType> completedChecks = evidence.stream().map(Evidence::type)
+                .filter(type -> type != EvidenceType.DATA_UNAVAILABLE).distinct().toList();
+        return new AgentFinding(task.taskId(), task.agentType(), FindingStatus.INSUFFICIENT_EVIDENCE,
+                CauseCode.UNKNOWN, List.of(), List.of(), completedChecks, List.of(), null,
+                "The specialist preserved collected evidence after its final structured response failed validation",
+                List.of(), "", stepsUsed);
+    }
+
+    private FindingStatus findingStatus(String raw) {
+        String value = normalizeEnum(raw);
+        return switch (value) {
+            case "SUCCEEDED", "SUCCESS", "COMPLETED", "CONFIRMED", "SUPPORTED" -> FindingStatus.SUCCEEDED;
+            case "OUT_OF_SCOPE" -> FindingStatus.OUT_OF_SCOPE;
+            case "TIMED_OUT", "TIMEOUT" -> FindingStatus.TIMED_OUT;
+            case "FAILED", "FAILURE" -> FindingStatus.FAILED;
+            default -> FindingStatus.INSUFFICIENT_EVIDENCE;
+        };
+    }
+
+    private CauseCode causeCode(String raw) {
+        String value = normalizeEnum(raw);
+        try {
+            return CauseCode.valueOf(value);
+        } catch (IllegalArgumentException exception) {
+            return switch (value) {
+                case "CPU_HOTSPOT", "JVM_CPU_HIGH" -> CauseCode.JVM_CPU_HOTSPOT;
+                case "THREAD_POOL_EXHAUSTED", "JVM_THREAD_POOL_SATURATION" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
+                case "SLOW_SQL", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
+                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED" -> CauseCode.DB_POOL_EXHAUSTED;
+                case "DOWNSTREAM_TIMEOUT" -> CauseCode.DEPENDENCY_TIMEOUT;
+                case "REDIS_LATENCY", "CACHE_SERVER_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
+                case "CACHE_CLIENT_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
+                default -> CauseCode.UNKNOWN;
+            };
+        }
+    }
+
+    private String normalizeEnum(String raw) {
+        return raw == null ? "" : raw.trim().toUpperCase().replace('-', '_').replace(' ', '_');
     }
 
     private String extractJson(String raw) {
@@ -245,20 +309,20 @@ public class SpecialistAgentRunner {
         return List.copyOf(result);
     }
 
-    private List<UUID> strictIds(JsonNode node, String name, Set<UUID> allowed) {
-        List<UUID> values = ids(node, name);
-        if (!allowed.containsAll(values) || values.size() != node.path(name).size()) {
-            throw new IllegalArgumentException("Finding contains an invalid " + name + " reference");
-        }
-        return values;
+    private List<UUID> allowedIds(JsonNode node, String name, Set<UUID> allowed) {
+        return ids(node, name).stream().filter(allowed::contains).distinct().toList();
     }
 
     private AgentType optionalAgent(JsonNode node, String name) {
         String value = node.path(name).asText("");
-        if (value.isBlank() || "NULL".equalsIgnoreCase(value)) {
+        if (value.isBlank() || Set.of("NULL", "NONE", "N/A", "NOT_APPLICABLE").contains(value.toUpperCase())) {
             return null;
         }
-        return AgentType.valueOf(value.toUpperCase());
+        try {
+            return AgentType.valueOf(normalizeEnum(value));
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private String argumentsHash(AgentStepDecision decision) {
