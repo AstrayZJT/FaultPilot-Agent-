@@ -114,7 +114,7 @@ faultpilot:
     model-name: ${MODEL_NAME:glm-5}
     api-key: ${QWEN_API_KEY:}
     required: ${FAULTPILOT_REQUIRE_REMOTE_MODEL:true}
-    timeout-seconds: ${MODEL_TIMEOUT_SECONDS:30}
+    timeout-seconds: ${MODEL_TIMEOUT_SECONDS:90}
     temperature: 0
 ```
 

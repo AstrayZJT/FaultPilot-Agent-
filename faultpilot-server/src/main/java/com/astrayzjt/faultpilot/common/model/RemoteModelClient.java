@@ -8,6 +8,8 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,8 @@ import java.util.UUID;
 
 @Service
 public class RemoteModelClient {
+
+    private static final Logger log = LoggerFactory.getLogger(RemoteModelClient.class);
 
     private final ObjectProvider<ChatModel> chatModelProvider;
     private final TraceRepository traceRepository;
@@ -55,9 +59,11 @@ public class RemoteModelClient {
             } catch (RuntimeException exception) {
                 traceRepository.model(incidentId, taskId, model.getClass().getSimpleName(),
                         role.name().toLowerCase() + "-" + promptVersion, null, null, startedAt, "FAILED");
+                log.warn("Remote model call failed: role={}, promptVersion={}, attempt={}, failure={}",
+                        role, promptVersion, attempt, rootCauseType(exception));
                 if (attempt == 2) {
-                    recordFailure(incidentId, role, promptVersion, "REMOTE_CALL_FAILED");
-                    throw new RemoteModelUnavailableException("Remote model call failed for " + role);
+                    recordFailure(incidentId, role, promptVersion, failureCode(exception));
+                    throw new RemoteModelUnavailableException("Remote model call failed for " + role, exception);
                 }
             }
         }
@@ -69,5 +75,25 @@ public class RemoteModelClient {
             eventService.append(incidentId, "MODEL_CALL_FAILED", Map.of(
                     "role", role.name(), "promptVersion", promptVersion, "code", code));
         }
+    }
+
+    private static String failureCode(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof java.net.http.HttpTimeoutException
+                    || current instanceof java.util.concurrent.TimeoutException) {
+                return "REMOTE_TIMEOUT";
+            }
+            current = current.getCause();
+        }
+        return "REMOTE_CALL_FAILED";
+    }
+
+    private static String rootCauseType(Throwable failure) {
+        Throwable current = failure;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getClass().getSimpleName();
     }
 }

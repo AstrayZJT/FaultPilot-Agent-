@@ -212,3 +212,14 @@ Status: PASSED (agent routing and bounded self-reflection; final result intentio
 - The final result was `INCONCLUSIVE`: Arthas was not configured in the server-side catalog, and a required second-round remote model call was unavailable. The system recorded the missing diagnostic capability and model failure, and did not claim a source method or confirm a root cause from model prose.
 
 This verifies that a caller can report an unknown or incorrect symptom. FaultPilot first uses structured observations, then lets the model Critic request a targeted follow-up, with EvidenceGate enforcing the final confidence boundary.
+
+## GLM-5 Timeout and Database Pool Regression
+
+Status: PASSED
+
+- Incidents `d25c8559-cfc4-4f0d-8e36-a8aa286d376e` and `63c7b840-5157-4ab1-94cb-4f3cc4e79a08` reproduced two Diagnosis Synthesizer failures at approximately 45,000 ms per attempt.
+- The configurable model timeout default was raised from 45 to 90 seconds, and remote failures now retain their cause and record a bounded failure category without logging credentials or prompts.
+- Scenario run `2005d312-a2f5-4829-88b1-4b34397287ef` injected `DB_POOL_EXHAUSTED`; incident `6b5ad1d0-d17a-4596-b893-367391b1b6a4` used an intentionally cause-agnostic timeout symptom.
+- The first Diagnosis Synthesizer call completed successfully in 84,126 ms, directly validating the new timeout boundary. Both Critic calls returned `PASS` and the bounded second investigation round completed.
+- The incident finished `DIAGNOSED`; EvidenceGate returned `SUPPORTED` with primary cause `DB_POOL_EXHAUSTED` and retained `CONNECTION_HOLDING_QUERY_FOUND` as missing corroboration.
+- The controlled scenario was recovered, all order-service diagnostic flags returned to false, and all 52 server tests passed.

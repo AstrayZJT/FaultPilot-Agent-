@@ -51,7 +51,7 @@ public class RemoteModelConfiguration {
 
         public ModelProperties {
             if (timeoutSeconds <= 0) {
-                timeoutSeconds = 8;
+                timeoutSeconds = 90;
             }
         }
     }

@@ -26,6 +26,7 @@ The application never reads a local model. Configure the real GLM endpoint and k
 $env:MODEL_BASE_URL = "https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 $env:MODEL_NAME = "glm-5"
 $env:QWEN_API_KEY = "<your-rotated-key>"
+$env:MODEL_TIMEOUT_SECONDS = "90"
 $env:FAULTPILOT_SECURITY_VIEWER_PASSWORD = "<viewer-password>"
 $env:FAULTPILOT_SECURITY_OPERATOR_PASSWORD = "<operator-password>"
 $env:ALERTMANAGER_WEBHOOK_TOKEN = "<webhook-token>"
