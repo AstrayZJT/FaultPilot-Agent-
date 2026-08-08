@@ -31,6 +31,8 @@ springdoc:
 faultpilot:
   integration:
     mode: ${FAULTPILOT_INTEGRATION_MODE:LAB}
+  agent:
+    specialist-deadline-seconds: ${FAULTPILOT_SPECIALIST_DEADLINE_SECONDS:120}
   observability:
     prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
     timeout-seconds: ${OBSERVABILITY_TIMEOUT_SECONDS:5}

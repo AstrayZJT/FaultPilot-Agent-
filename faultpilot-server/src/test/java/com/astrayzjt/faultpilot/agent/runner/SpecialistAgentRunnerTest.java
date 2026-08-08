@@ -11,6 +11,7 @@ import com.astrayzjt.faultpilot.common.domain.FindingStatus;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.TimeRange;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
+import com.astrayzjt.faultpilot.common.model.RemoteModelUnavailableException;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentStepRepository;
@@ -71,17 +72,58 @@ class SpecialistAgentRunnerTest {
         verify(fixture.eventService).append(eq(fixture.task.incidentId()), eq("SPECIALIST_OUTPUT_FALLBACK"), any());
     }
 
+    @Test
+    void normalizesRedisLatencyEvidenceAliasInSpecialistFinding() {
+        Fixture fixture = fixture(AgentType.CACHE_AGENT, EvidenceType.REDIS_COMMAND_LATENCY_HIGH, "Redis is slow");
+        String decision = "{\"action\":\"COMPLETE\",\"toolName\":null,\"arguments\":{}," +
+                "\"evidenceIds\":[],\"suggestedAgent\":null,\"decisionSummary\":\"done\"}";
+        String finding = "{\"status\":\"SUPPORTED\",\"causeCode\":\"REDIS_COMMAND_LATENCY_HIGH\"," +
+                "\"supportingEvidenceIds\":[\"" + fixture.evidence.evidenceId() + "\"]," +
+                "\"counterEvidenceIds\":[],\"completedChecks\":[\"REDIS_COMMAND_LATENCY_HIGH\"]," +
+                "\"missingChecks\":[\"REDIS_SLOW_COMMAND_FOUND\"],\"suggestedAgent\":null," +
+                "\"summary\":\"Redis command latency is high\"}";
+        when(fixture.modelClient.complete(any(), any(), any(), anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(decision, finding);
+
+        AgentFinding result = fixture.runner.run(fixture.task, fixture.snapshot, List.of(fixture.evidence));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.SUCCEEDED);
+        assertThat(result.causeCode()).isEqualTo(CauseCode.REDIS_SERVER_LATENCY);
+        assertThat(result.supportingEvidenceIds()).containsExactly(fixture.evidence.evidenceId());
+    }
+
+    @Test
+    void preservesCollectedEvidenceWhenRemoteFindingCallIsUnavailable() {
+        Fixture fixture = fixture(AgentType.CACHE_AGENT, EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH,
+                "Redis client pool is saturated");
+        String decision = "{\"action\":\"COMPLETE\",\"toolName\":null,\"arguments\":{}," +
+                "\"evidenceIds\":[],\"suggestedAgent\":null,\"decisionSummary\":\"done\"}";
+        when(fixture.modelClient.complete(any(), any(), any(), anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(decision)
+                .thenThrow(new RemoteModelUnavailableException("Qwen timed out"));
+
+        AgentFinding result = fixture.runner.run(fixture.task, fixture.snapshot, List.of(fixture.evidence));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.INSUFFICIENT_EVIDENCE);
+        assertThat(result.completedChecks()).containsExactly(EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH);
+        verify(fixture.eventService).append(eq(fixture.task.incidentId()), eq("SPECIALIST_OUTPUT_FALLBACK"), any());
+    }
+
     private Fixture fixture() {
+        return fixture(AgentType.JVM_AGENT, EvidenceType.PROCESS_CPU_HIGH, "CPU high");
+    }
+
+    private Fixture fixture(AgentType agentType, EvidenceType evidenceType, String symptom) {
         UUID incidentId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
         Instant now = Instant.now();
-        AgentTask task = new AgentTask(taskId, incidentId, "jvm-round-1", AgentType.JVM_AGENT,
-                "Investigate CPU", 1, 1, AgentTaskStatus.PENDING, null, null);
-        IncidentSnapshot snapshot = new IncidentSnapshot(incidentId, "order-service", "CPU high", null,
+        AgentTask task = new AgentTask(taskId, incidentId, agentType.name().toLowerCase() + "-round-1", agentType,
+                "Investigate " + symptom, 1, 1, AgentTaskStatus.PENDING, null, null);
+        IncidentSnapshot snapshot = new IncidentSnapshot(incidentId, "order-service", symptom, null,
                 new TimeRange(now.minusSeconds(60), now), null, null, null, false, now);
-        Evidence evidence = new Evidence(UUID.randomUUID(), incidentId, null, EvidenceType.PROCESS_CPU_HIGH,
-                "prometheus:order-service:process_cpu_usage", "order-service", now.minusSeconds(60), now,
-                "Process CPU is high", null, "hash", now);
+        Evidence evidence = new Evidence(UUID.randomUUID(), incidentId, null, evidenceType,
+                "test:order-service:evidence", "order-service", now.minusSeconds(60), now,
+                symptom, null, "hash", now);
 
         RemoteModelClient modelClient = mock(RemoteModelClient.class);
         AgentStepRepository stepRepository = mock(AgentStepRepository.class);
@@ -89,7 +131,7 @@ class SpecialistAgentRunnerTest {
         IncidentEventService eventService = mock(IncidentEventService.class);
         SpecialistAgentRunner runner = new SpecialistAgentRunner(new ToolRegistry(List.of()),
                 mock(EvidenceService.class), new ObjectMapper(), modelClient, mock(ToolInvocationGuard.class),
-                stepRepository, mock(TraceRepository.class), eventService);
+                stepRepository, mock(TraceRepository.class), eventService, 120);
         return new Fixture(runner, modelClient, eventService, task, snapshot, evidence);
     }
 

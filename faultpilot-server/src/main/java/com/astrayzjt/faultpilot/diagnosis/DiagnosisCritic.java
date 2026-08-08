@@ -43,7 +43,13 @@ public class DiagnosisCritic {
         String system = "You are FaultPilot Critic Agent. Independently audit the supplied DiagnosisProposal against " +
                 "the raw structured Evidence and AgentFindings. Do not invent facts. Check unsupported causal claims, " +
                 "counter evidence, alternative causes, missing high-value checks and unsafe remediation claims. " +
-                "Return JSON only: {verdict,issues:[{type,summary,evidenceIds,missingEvidenceTypes,suggestedAgent}],summary}. " +
+                "EvidenceGate separately grades corroboration. When a proposal honestly cites a direct signal and " +
+                "marks absent corroboration as missing, do not require a follow-up solely to obtain that corroboration; " +
+                "PASS it and let EvidenceGate return SUPPORTED. REDIS_SERVER_LATENCY is the catalog umbrella for " +
+                "end-to-end Redis command-path latency, including network or connection delay; normal Redis INFO or " +
+                "SLOWLOG does not contradict REDIS_COMMAND_LATENCY_HIGH. Treat AgentFinding prose without a cited " +
+                "Evidence ID as unaudited context, not as a proposal contradiction. Return JSON only: " +
+                "{verdict,issues:[{type,summary,evidenceIds,missingEvidenceTypes,suggestedAgent}],summary}. " +
                 "Use PASS only when the proposal is adequately supported. Empty issues and arrays are valid. " +
                 "Allowed verdicts are PASS, REVISE, FOLLOW_UP, REJECT.";
         String user = "snapshot=" + json(snapshot) + "\nproposal=" + json(proposal) +

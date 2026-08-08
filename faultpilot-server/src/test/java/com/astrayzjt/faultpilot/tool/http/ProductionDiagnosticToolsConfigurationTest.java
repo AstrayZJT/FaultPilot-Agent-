@@ -81,7 +81,7 @@ class ProductionDiagnosticToolsConfigurationTest {
     void mapsCuratedPostgresFingerprintToSlowSqlEvidence() {
         PostgresDiagnosticsClient client = mock(PostgresDiagnosticsClient.class);
         PostgresDiagnosticsClient.SlowStatement statement = new PostgresDiagnosticsClient.SlowStatement(
-                "918273", 18, 1_250, 1_600);
+                "918273", 18, 200, 1_600);
         when(client.inspectSlowStatements("order-service")).thenReturn(
                 new PostgresDiagnosticsClient.SlowStatementInspection(true, true, "orders", List.of(statement)));
         ObservabilityProperties properties = new ObservabilityProperties();

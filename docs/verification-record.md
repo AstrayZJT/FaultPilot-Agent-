@@ -111,10 +111,65 @@ Defects fixed during this verification:
 - Specialist, Diagnosis, and Critic parsers now normalize known Qwen enum aliases while dropping malformed or cross-incident evidence IDs.
 - Missing optional arrays and common field aliases no longer invalidate an otherwise safe structured response.
 - Diagnosis proposal, critique, and gate repositories now cast serialized documents to PostgreSQL `jsonb` explicitly.
-- `mvn clean verify` passes with 42 server tests and the complete five-module reactor build.
+- `mvn clean verify` passes across the complete five-module reactor build: 46 server tests, 2 order-lab tests, and 1 evaluation test.
 
-## Pending Verification
+## Redis Production Read-Only End-to-End Tests
 
-- Slow SQL diagnosis and remediation confirmation in LAB mode.
-- Database connection-pool exhaustion diagnosis and remediation confirmation in LAB mode.
-- Downstream dependency timeout diagnosis and remediation confirmation in LAB mode.
+Status: PASSED
+
+Redis command-path latency:
+
+- Scenario run: `a85dd079-ea60-45c8-98e9-94cc1e7af7c1`; Prometheus observed approximately `0.479s` command latency.
+- Incident: `fa0e8949-3a98-44a1-8dbc-7d63ccd20981`; status `DIAGNOSED`.
+- The Supervisor selected only `CACHE_AGENT`; its four tool steps completed and cited `REDIS_COMMAND_LATENCY_HIGH`.
+- The Diagnosis Agent proposed `REDIS_SERVER_LATENCY`, the Critic returned `PASS`, and EvidenceGate returned `SUPPORTED`.
+- Missing corroboration is explicit: `REDIS_TRACE_LATENCY_CORRELATED` or `REDIS_SLOW_COMMAND_FOUND`.
+
+Redis client-pool exhaustion:
+
+- Scenario run: `bff476fc-1e7c-434b-9f81-f04c9c37d97a`; Prometheus observed `active=4`, `max=4`.
+- Incident: `c5b77b95-718d-4f9f-a9e3-1ca2338c7874`; status `DIAGNOSED`.
+- Direct evidence was `REDIS_CLIENT_POOL_PENDING_HIGH`, while normal command latency isolated the client pool from Redis command processing.
+- The Diagnosis Agent proposed `REDIS_CLIENT_POOL_EXHAUSTED`, the Critic returned `PASS`, and EvidenceGate returned `SUPPORTED`.
+- The Specialist's final model summary timed out; the conservative fallback retained all Evidence and allowed the remaining model-backed diagnosis pipeline to complete.
+
+## Database Production Read-Only End-to-End Tests
+
+Status: PASSED
+
+Database connection-pool exhaustion:
+
+- Scenario run: `0ff52ebe-8d89-427c-bb03-003425a12d3d`; Prometheus observed Hikari `active=10`, `max=10`.
+- Incident: `4c241441-9da4-4732-a923-0381f6649147`; status `DIAGNOSED`.
+- The Diagnosis Agent proposed `DB_POOL_EXHAUSTED`, the Critic returned `PASS`, and EvidenceGate returned `SUPPORTED`.
+- `CONNECTION_HOLDING_QUERY_FOUND` remains explicitly missing because the lab-held connections had no long-running non-idle transaction to attribute.
+
+Slow SQL:
+
+- Scenario run: `587667a4-aab2-4638-a577-5f275be78755` executed the delay inside PostgreSQL, not as a Java-side sleep.
+- PostgreSQL recorded a statement maximum of approximately `2003ms`; FaultPilot returned only its fingerprint, call count, and bounded durations.
+- Incident: `b9f42346-2017-4b43-ab33-4b9c28defb3c`; status `DIAGNOSED`.
+- `DATABASE_AGENT` produced `SLOW_SQL_FOUND`; the Diagnosis Agent proposed `DB_SLOW_QUERY`, the Critic returned `PASS`, and EvidenceGate returned `SUPPORTED`.
+- Trace correlation or an abnormal execution plan remains required for `CONFIRMED`.
+
+## Downstream Production Read-Only End-to-End Test
+
+Status: PASSED
+
+- Scenario run: `3d1d33cc-00ba-46e7-9561-7dbb29b631e9`; inventory-service latency was approximately `1.552s`.
+- Incident: `284c2c65-e90e-42dd-ba59-01a9cb9ce489`; status `DIAGNOSED`.
+- The Supervisor selected only `DEPENDENCY_AGENT`, which completed three steps and cited `DOWNSTREAM_LATENCY_HIGH`.
+- The Diagnosis Agent proposed `DEPENDENCY_TIMEOUT`, the Critic returned `PASS`, and EvidenceGate returned `SUPPORTED`.
+- `SLOW_CHILD_SPAN_FOUND` remains missing because no Jaeger backend was configured; no trace fact was invented.
+
+## Defects Fixed During Multi-Scenario Verification
+
+- The Specialist deadline is configurable and bounded instead of being fixed at 30 seconds.
+- LangChain4j's hidden retry loop is disabled; FaultPilot owns and persists at most two model attempts, preventing one call from silently consuming roughly 270 seconds.
+- A failed Specialist final-summary call now preserves collected Evidence in a conservative fallback Finding instead of failing the entire Incident.
+- Redis, database, downstream, JVM, and thread-pool direct evidence aliases normalize to catalog cause codes without accepting unknown Evidence IDs.
+- Diagnosis and Critic prompts distinguish direct signals from optional corroboration and treat uncited Agent prose as unaudited context.
+- The slow SQL laboratory now executes the delay inside PostgreSQL so `pg_stat_statements` can observe it.
+- Slow-statement detection checks both mean and maximum execution time, preventing intermittent outliers from being hidden by historical averages.
+
+All scenarios above ran with FaultPilot in `PRODUCTION_READ_ONLY`; their inject/recover endpoints belong only to the target lab services. FaultPilot itself performed no remediation. Live Jaeger corroboration and production remediation handlers remain deployment-specific integrations and are intentionally not simulated as production evidence.

@@ -55,4 +55,38 @@ class DiagnosisSynthesizerTest {
         assertThat(proposal.requestedFollowUps()).isEmpty();
         assertThat(proposal.causalSummary()).contains("JVM hotspot");
     }
+
+    @Test
+    void normalizesRedisSignalAliasAsTheRedisLatencyCause() {
+        UUID incidentId = UUID.randomUUID();
+        UUID evidenceId = UUID.randomUUID();
+        Instant now = Instant.now();
+        Evidence evidence = new Evidence(evidenceId, incidentId, null, EvidenceType.REDIS_COMMAND_LATENCY_HIGH,
+                "redis:lab-redis:command-latency", "order-service", now.minusSeconds(60), now,
+                "Redis command latency is high", null, "hash", now);
+        IncidentSnapshot snapshot = new IncidentSnapshot(incidentId, "order-service", "Redis is slow", null,
+                new TimeRange(now.minusSeconds(60), now), null, null, null, false, now);
+        RemoteModelClient modelClient = mock(RemoteModelClient.class);
+        String response = """
+                {
+                  "status": "SUPPORTED",
+                  "primaryCause": "REDIS_COMMAND_LATENCY_HIGH",
+                  "supportingEvidenceIds": ["%s"],
+                  "contributingFactors": ["UNKNOWN", "REDIS_SERVER_LATENCY"],
+                  "missingEvidenceTypes": ["REDIS_SLOW_COMMAND_FOUND"],
+                  "summary": "Redis command latency exceeds the configured threshold"
+                }
+                """.formatted(evidenceId);
+        when(modelClient.complete(any(), any(), any(), anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(response);
+
+        var proposal = new DiagnosisSynthesizer(modelClient, new ObjectMapper())
+                .propose(snapshot, List.of(evidence), List.of(), List.of(), 1, 0, null);
+
+        assertThat(proposal.status()).isEqualTo(com.astrayzjt.faultpilot.common.domain.ProposalStatus.READY_FOR_REVIEW);
+        assertThat(proposal.primaryCause()).isEqualTo(CauseCode.REDIS_SERVER_LATENCY);
+        assertThat(proposal.contributingFactors()).isEmpty();
+        assertThat(proposal.supportingEvidenceIds()).containsExactly(evidenceId);
+        assertThat(proposal.missingEvidenceTypes()).containsExactly(EvidenceType.REDIS_SLOW_COMMAND_FOUND);
+    }
 }

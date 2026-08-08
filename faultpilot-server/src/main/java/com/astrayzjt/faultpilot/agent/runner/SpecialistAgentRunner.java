@@ -14,6 +14,7 @@ import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
 import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
+import com.astrayzjt.faultpilot.common.model.RemoteModelUnavailableException;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
 import com.astrayzjt.faultpilot.incident.event.IncidentEventService;
 import com.astrayzjt.faultpilot.orchestration.persistence.AgentStepRepository;
@@ -25,6 +26,7 @@ import com.astrayzjt.faultpilot.tool.registry.ToolResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -46,11 +48,13 @@ public class SpecialistAgentRunner {
     private final AgentStepRepository stepRepository;
     private final TraceRepository traceRepository;
     private final IncidentEventService eventService;
+    private final long specialistDeadlineSeconds;
 
     public SpecialistAgentRunner(ToolRegistry toolRegistry, EvidenceService evidenceService,
                                  ObjectMapper objectMapper, RemoteModelClient modelClient,
                                  ToolInvocationGuard invocationGuard, AgentStepRepository stepRepository,
-                                 TraceRepository traceRepository, IncidentEventService eventService) {
+                                 TraceRepository traceRepository, IncidentEventService eventService,
+                                 @Value("${faultpilot.agent.specialist-deadline-seconds:120}") long specialistDeadlineSeconds) {
         this.toolRegistry = toolRegistry;
         this.evidenceService = evidenceService;
         this.objectMapper = objectMapper;
@@ -59,10 +63,11 @@ public class SpecialistAgentRunner {
         this.stepRepository = stepRepository;
         this.traceRepository = traceRepository;
         this.eventService = eventService;
+        this.specialistDeadlineSeconds = Math.max(30, Math.min(300, specialistDeadlineSeconds));
     }
 
     public AgentFinding run(AgentTask task, IncidentSnapshot snapshot, List<Evidence> existingEvidence) {
-        Instant deadline = Instant.now().plusSeconds(30);
+        Instant deadline = Instant.now().plusSeconds(specialistDeadlineSeconds);
         List<Evidence> collected = new ArrayList<>(existingEvidence);
         List<Observation> observations = new ArrayList<>();
         Set<String> calledTools = new HashSet<>();
@@ -157,39 +162,56 @@ public class SpecialistAgentRunner {
                 "Use only supplied evidence. Return JSON only with fields: status, causeCode, " +
                 "supportingEvidenceIds, counterEvidenceIds, completedChecks, missingChecks, suggestedAgent, summary. " +
                 "Do not invent evidence IDs, tools, source locations, or remediation claims. " +
+                "An observation without an evidenceId is operational context only: do not present it as an audited " +
+                "fact or use it as supporting or counter evidence. REDIS_SERVER_LATENCY is the catalog cause for " +
+                "end-to-end Redis command-path latency; it does not assert Redis process resource saturation. " +
                 "When BLOCKING_TASK_FOUND is supplied, cite it when describing the observed class, method, file, line, or blocking operation. " +
-                "If evidence is insufficient, use INSUFFICIENT_EVIDENCE.";
+                "Return SUCCEEDED when cited direct evidence supports a candidate cause, even when a secondary " +
+                "corroborating check is unavailable; EvidenceGate makes the final confidence decision. " +
+                "Use INSUFFICIENT_EVIDENCE only when no cited direct evidence supports a cause.";
         String user = "AgentType=" + task.agentType() + "\nTask=" + task.objective() +
                 "\nSnapshot=" + serialize(snapshot) + "\nEvidence=" + serialize(evidence) +
                 "\nObservations=" + serialize(observations) + "\nLastDecision=" + serialize(lastDecision);
-        String raw = modelClient.complete(task.incidentId(), task.taskId(), ModelRole.SPECIALIST,
-                task.agentType().name().toLowerCase() + "-finding-v2", system, user, 800);
+        String raw;
+        try {
+            raw = modelClient.complete(task.incidentId(), task.taskId(), ModelRole.SPECIALIST,
+                    task.agentType().name().toLowerCase() + "-finding-v2", system, user, 800);
+        } catch (RemoteModelUnavailableException exception) {
+            return fallbackFinding(task, evidence, stepsUsed, "Remote finding call was unavailable");
+        }
         try {
             return parseFinding(task, raw, evidence, stepsUsed);
         } catch (RuntimeException exception) {
             Set<UUID> allowedEvidenceIds = evidence.stream().map(Evidence::evidenceId)
                     .collect(java.util.stream.Collectors.toSet());
-            String repaired = modelClient.complete(task.incidentId(), task.taskId(), ModelRole.SPECIALIST,
-                    task.agentType().name().toLowerCase() + "-finding-repair-v2",
-                    "Repair the draft into one JSON object only. Required fields: " +
-                            "status, causeCode, supportingEvidenceIds, counterEvidenceIds, completedChecks, " +
-                            "missingChecks, suggestedAgent, summary. " +
-                            "Allowed status values: " + java.util.Arrays.toString(FindingStatus.values()) + ". " +
-                            "Allowed causeCode values: " + java.util.Arrays.toString(CauseCode.values()) + ". " +
-                            "suggestedAgent must be one of " + java.util.Arrays.toString(AgentType.values()) + " or null. " +
-                            "Evidence ID arrays may contain only IDs from AllowedEvidenceIds. Never invent an ID.",
-                    "Draft=" + raw + "\nAllowedEvidenceIds=" + serialize(allowedEvidenceIds), 800);
             try {
+                String repaired = modelClient.complete(task.incidentId(), task.taskId(), ModelRole.SPECIALIST,
+                        task.agentType().name().toLowerCase() + "-finding-repair-v2",
+                        "Repair the draft into one JSON object only. Required fields: " +
+                                "status, causeCode, supportingEvidenceIds, counterEvidenceIds, completedChecks, " +
+                                "missingChecks, suggestedAgent, summary. " +
+                                "Allowed status values: " + java.util.Arrays.toString(FindingStatus.values()) + ". " +
+                                "Allowed causeCode values: " + java.util.Arrays.toString(CauseCode.values()) + ". " +
+                                "suggestedAgent must be one of " + java.util.Arrays.toString(AgentType.values()) + " or null. " +
+                                "Evidence ID arrays may contain only IDs from AllowedEvidenceIds. Never invent an ID.",
+                        "Draft=" + raw + "\nAllowedEvidenceIds=" + serialize(allowedEvidenceIds), 800);
                 return parseFinding(task, repaired, evidence, stepsUsed);
             } catch (RuntimeException ignored) {
-                eventService.append(task.incidentId(), "SPECIALIST_OUTPUT_FALLBACK", Map.of(
-                        "taskId", task.taskId().toString(),
-                        "agent", task.agentType().name(),
-                        "evidenceCount", evidence.size(),
-                        "reason", "Both constrained finding responses were invalid"));
-                return safeFallbackFinding(task, evidence, stepsUsed);
+                return fallbackFinding(task, evidence, stepsUsed,
+                        ignored instanceof RemoteModelUnavailableException
+                                ? "Remote finding repair call was unavailable"
+                                : "Both constrained finding responses were invalid");
             }
         }
+    }
+
+    private AgentFinding fallbackFinding(AgentTask task, List<Evidence> evidence, int stepsUsed, String reason) {
+        eventService.append(task.incidentId(), "SPECIALIST_OUTPUT_FALLBACK", Map.of(
+                "taskId", task.taskId().toString(),
+                "agent", task.agentType().name(),
+                "evidenceCount", evidence.size(),
+                "reason", reason));
+        return safeFallbackFinding(task, evidence, stepsUsed);
     }
 
     private AgentStepDecision parseDecision(String raw) {
@@ -258,13 +280,19 @@ public class SpecialistAgentRunner {
             return CauseCode.valueOf(value);
         } catch (IllegalArgumentException exception) {
             return switch (value) {
-                case "CPU_HOTSPOT", "JVM_CPU_HIGH" -> CauseCode.JVM_CPU_HOTSPOT;
-                case "THREAD_POOL_EXHAUSTED", "JVM_THREAD_POOL_SATURATION" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
-                case "SLOW_SQL", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
-                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED" -> CauseCode.DB_POOL_EXHAUSTED;
-                case "DOWNSTREAM_TIMEOUT" -> CauseCode.DEPENDENCY_TIMEOUT;
-                case "REDIS_LATENCY", "CACHE_SERVER_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
-                case "CACHE_CLIENT_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
+                case "CPU_HOTSPOT", "JVM_CPU_HIGH", "PROCESS_CPU_HIGH" -> CauseCode.JVM_CPU_HOTSPOT;
+                case "THREAD_POOL_EXHAUSTED", "JVM_THREAD_POOL_SATURATION", "THREAD_POOL_ACTIVE_AT_MAX",
+                        "THREAD_POOL_QUEUE_GROWING" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
+                case "SLOW_SQL", "SLOW_SQL_FOUND", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
+                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_CONNECTION_POOL_EXHAUSTED",
+                        "DATABASE_POOL_EXHAUSTED", "DB_POOL_ACTIVE_AT_MAX", "DB_POOL_PENDING_HIGH" -> CauseCode.DB_POOL_EXHAUSTED;
+                case "DOWNSTREAM_TIMEOUT", "DOWNSTREAM_LATENCY_HIGH", "DEPENDENCY_LATENCY_HIGH" -> CauseCode.DEPENDENCY_TIMEOUT;
+                case "REDIS_LATENCY", "REDIS_LATENCY_HIGH", "REDIS_COMMAND_LATENCY_HIGH", "REDIS_SERVER_SLOW",
+                        "REDIS_SERVER_LATENCY_HIGH", "CACHE_SERVER_LATENCY", "CACHE_LATENCY_HIGH",
+                        "CACHE_COMMAND_LATENCY_HIGH", "HIGH_REDIS_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
+                case "CACHE_CLIENT_POOL_EXHAUSTED", "CACHE_CLIENT_POOL_SATURATED", "REDIS_POOL_EXHAUSTED",
+                        "REDIS_CLIENT_POOL_SATURATED", "REDIS_CLIENT_POOL_PENDING_HIGH",
+                        "REDIS_CLIENT_CONNECTION_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
                 default -> CauseCode.UNKNOWN;
             };
         }

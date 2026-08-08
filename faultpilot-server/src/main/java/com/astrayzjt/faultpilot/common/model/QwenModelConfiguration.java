@@ -25,6 +25,7 @@ public class QwenModelConfiguration {
                 .modelName(properties.modelName())
                 .temperature(properties.temperature())
                 .timeout(Duration.ofSeconds(properties.timeoutSeconds()))
+                .maxRetries(0)
                 .build();
     }
 

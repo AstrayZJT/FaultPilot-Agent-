@@ -89,7 +89,7 @@ faultpilot:
         max-rows: 20
 ```
 
-When the target is unavailable, missing `pg_stat_statements`, or lacks the statistics grant, FaultPilot records `DATA_UNAVAILABLE`. It does not convert missing database evidence into a model-only diagnosis. A slow statement fingerprint becomes `SLOW_SQL_FOUND`; a long non-idle connection group becomes `CONNECTION_HOLDING_QUERY_FOUND`. Either result still requires the EvidenceGate's independent latency or pool-pressure corroboration before a cause can be confirmed.
+When the target is unavailable, missing `pg_stat_statements`, or lacks the statistics grant, FaultPilot records `DATA_UNAVAILABLE`. It does not convert missing database evidence into a model-only diagnosis. A statement fingerprint becomes `SLOW_SQL_FOUND` when either its mean or maximum execution time exceeds the configured threshold; this catches intermittent outliers without exposing SQL text. A long non-idle connection group becomes `CONNECTION_HOLDING_QUERY_FOUND`. Either result still requires the EvidenceGate's independent latency or pool-pressure corroboration before a cause can be confirmed.
 
 ## Redis cache diagnostics
 
@@ -183,6 +183,8 @@ Configure one Service Catalog entry per business service:
 faultpilot:
   integration:
     mode: PRODUCTION_READ_ONLY
+  agent:
+    specialist-deadline-seconds: 120
   observability:
     prometheus-url: http://prometheus:9090
   remediation:
@@ -204,6 +206,8 @@ faultpilot:
 ```
 
 `prometheus-labels` must match labels assigned by Prometheus. The labels are server-side configuration and are never taken from model output.
+
+`specialist-deadline-seconds` is bounded to 30-300 seconds. The Qwen HTTP timeout remains independently bounded by `QWEN_TIMEOUT_SECONDS`; LangChain4j's implicit retries are disabled, and FaultPilot performs at most two explicit, auditable attempts per model call. If a Specialist's final structured summary remains unavailable, collected Evidence is preserved in a conservative fallback Finding so that the Diagnosis Agent can still evaluate it.
 
 For the included local business sample, run the existing order service and Prometheus, then start FaultPilot with:
 

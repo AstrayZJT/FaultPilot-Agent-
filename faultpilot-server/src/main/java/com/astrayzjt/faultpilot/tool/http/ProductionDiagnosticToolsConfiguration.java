@@ -237,7 +237,8 @@ public class ProductionDiagnosticToolsConfiguration {
                 return ToolResult.failure(source, "Configured PostgreSQL pg_stat_statements probe is unavailable");
             }
             List<PostgresDiagnosticsClient.SlowStatement> slowStatements = inspection.statements().stream()
-                    .filter(statement -> statement.meanDurationMillis() >= properties.getDatabaseSlowQueryThresholdMillis())
+                    .filter(statement -> statement.meanDurationMillis() >= properties.getDatabaseSlowQueryThresholdMillis()
+                            || statement.maxDurationMillis() >= properties.getDatabaseSlowQueryThresholdMillis())
                     .toList();
             return new ToolResult(true,
                     slowStatements.isEmpty() ? "PostgreSQL statement fingerprints are below the configured slow-query threshold" :

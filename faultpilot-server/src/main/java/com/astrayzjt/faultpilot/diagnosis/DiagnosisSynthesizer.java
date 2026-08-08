@@ -45,8 +45,14 @@ public class DiagnosisSynthesizer {
                 "Evidence and AgentFinding objects. Do not invent facts or evidence IDs. A proposal is not an action. " +
                 "Return JSON only with fields: status, primaryCause, contributingFactors, supportingEvidenceIds, " +
                 "counterEvidenceIds, missingEvidenceTypes, requestedFollowUps, causalSummary. " +
-                "Use status READY_FOR_REVIEW only when a plausible causal explanation exists; use INSUFFICIENT or " +
-                "CONTRADICTED when appropriate. requestedFollowUps entries must contain agentType, objective, " +
+                "Use status READY_FOR_REVIEW when a cited direct signal supports a plausible causal explanation; " +
+                "EvidenceGate, not you, decides whether missing corroboration lowers the final result to SUPPORTED. " +
+                "Only structured Evidence with a valid evidenceId is auditable; do not repeat uncited observations " +
+                "from AgentFinding prose as facts. REDIS_COMMAND_LATENCY_HIGH maps to REDIS_SERVER_LATENCY, the " +
+                "catalog umbrella for end-to-end Redis command-path latency including network or connection delay. " +
+                "REDIS_CLIENT_POOL_PENDING_HIGH maps to REDIS_CLIENT_POOL_EXHAUSTED. " +
+                "Use INSUFFICIENT only when no cited direct signal supports a cause, and use CONTRADICTED when " +
+                "cited counter evidence conflicts. requestedFollowUps entries must contain agentType, objective, " +
                 "missingEvidenceTypes and evidenceIds. Empty arrays are valid and should be returned explicitly. " +
                 "Allowed status values are READY_FOR_REVIEW, INSUFFICIENT, CONTRADICTED. Allowed primaryCause values are " +
                 java.util.Arrays.toString(CauseCode.values()) + ".";
@@ -85,8 +91,11 @@ public class DiagnosisSynthesizer {
             List<UUID> supporting = allowedIds(node, allowed, "supportingEvidenceIds", "supportingEvidence", "evidenceIds");
             List<UUID> counter = allowedIds(node, allowed, "counterEvidenceIds", "counterEvidence", "refutingEvidenceIds");
             List<FollowUpRequest> followUps = parseFollowUps(node, allowed);
+            List<CauseCode> contributingFactors = enumValues(node, this::causeCode,
+                    "contributingFactors", "contributingCauses").stream()
+                    .filter(candidate -> candidate != CauseCode.UNKNOWN && candidate != cause).toList();
             return new DiagnosisProposal(UUID.randomUUID(), incidentId, round, revision, status, cause,
-                    enumValues(node, this::causeCode, "contributingFactors", "contributingCauses"), supporting, counter,
+                    contributingFactors, supporting, counter,
                     enumValues(node, this::evidenceType, "missingEvidenceTypes", "missingEvidence", "missingChecks"), followUps,
                     text(node, "causalSummary", "summary", "explanation", "reasoning"));
         } catch (JsonProcessingException | RuntimeException exception) {
@@ -179,13 +188,21 @@ public class DiagnosisSynthesizer {
             return CauseCode.valueOf(value);
         } catch (IllegalArgumentException ignored) {
             return switch (value) {
-                case "CPU_HOTSPOT", "JVM_CPU_HIGH", "JVM_HIGH_CPU", "HIGH_CPU" -> CauseCode.JVM_CPU_HOTSPOT;
-                case "THREAD_POOL_EXHAUSTED", "THREAD_POOL_SATURATION", "JVM_THREAD_POOL_SATURATION" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
-                case "SLOW_SQL", "SQL_SLOW", "SLOW_QUERY", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
-                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED", "CONNECTION_POOL_EXHAUSTED", "DB_POOL_SATURATION" -> CauseCode.DB_POOL_EXHAUSTED;
-                case "DOWNSTREAM_TIMEOUT", "DOWNSTREAM_SLOW", "SERVICE_TIMEOUT", "DEPENDENCY_SLOW" -> CauseCode.DEPENDENCY_TIMEOUT;
-                case "REDIS_LATENCY", "REDIS_SERVER_SLOW", "CACHE_SERVER_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
-                case "CACHE_CLIENT_POOL_EXHAUSTED", "REDIS_POOL_EXHAUSTED", "CACHE_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
+                case "CPU_HOTSPOT", "JVM_CPU_HIGH", "JVM_HIGH_CPU", "HIGH_CPU", "PROCESS_CPU_HIGH" -> CauseCode.JVM_CPU_HOTSPOT;
+                case "THREAD_POOL_EXHAUSTED", "THREAD_POOL_SATURATION", "JVM_THREAD_POOL_SATURATION",
+                        "THREAD_POOL_ACTIVE_AT_MAX", "THREAD_POOL_QUEUE_GROWING" -> CauseCode.JVM_THREAD_POOL_EXHAUSTED;
+                case "SLOW_SQL", "SLOW_SQL_FOUND", "SQL_SLOW", "SLOW_QUERY", "DATABASE_SLOW_QUERY" -> CauseCode.DB_SLOW_QUERY;
+                case "DB_CONNECTION_POOL_EXHAUSTED", "DATABASE_CONNECTION_POOL_EXHAUSTED", "DATABASE_POOL_EXHAUSTED",
+                        "CONNECTION_POOL_EXHAUSTED", "DB_POOL_SATURATION", "DB_POOL_ACTIVE_AT_MAX",
+                        "DB_POOL_PENDING_HIGH" -> CauseCode.DB_POOL_EXHAUSTED;
+                case "DOWNSTREAM_TIMEOUT", "DOWNSTREAM_LATENCY_HIGH", "DOWNSTREAM_SLOW", "SERVICE_TIMEOUT",
+                        "DEPENDENCY_LATENCY_HIGH", "DEPENDENCY_SLOW" -> CauseCode.DEPENDENCY_TIMEOUT;
+                case "REDIS_LATENCY", "REDIS_LATENCY_HIGH", "REDIS_COMMAND_LATENCY_HIGH", "REDIS_SERVER_SLOW",
+                        "REDIS_SERVER_LATENCY_HIGH", "CACHE_SERVER_LATENCY", "CACHE_LATENCY_HIGH",
+                        "CACHE_COMMAND_LATENCY_HIGH", "HIGH_REDIS_LATENCY" -> CauseCode.REDIS_SERVER_LATENCY;
+                case "CACHE_CLIENT_POOL_EXHAUSTED", "CACHE_CLIENT_POOL_SATURATED", "REDIS_POOL_EXHAUSTED",
+                        "CACHE_POOL_EXHAUSTED", "REDIS_CLIENT_POOL_SATURATED", "REDIS_CLIENT_POOL_PENDING_HIGH",
+                        "REDIS_CLIENT_CONNECTION_POOL_EXHAUSTED" -> CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
                 default -> CauseCode.UNKNOWN;
             };
         }

@@ -14,6 +14,12 @@ import java.util.Map;
 @RequestMapping("/api/orders")
 public class OrderController {
 
+    static final String ORDER_QUERY = "SELECT order_number, item_name, quantity, created_at " +
+            "FROM lab_orders WHERE order_number = ?";
+    static final String SLOW_ORDER_QUERY = "WITH delay AS MATERIALIZED (SELECT pg_sleep(2)) " +
+            "SELECT order_number, item_name, quantity, created_at " +
+            "FROM lab_orders CROSS JOIN delay WHERE order_number = ?";
+
     private final JdbcTemplate jdbcTemplate;
     private final FaultScenarioManager faultManager;
     private final OrderCacheService orderCacheService;
@@ -27,11 +33,8 @@ public class OrderController {
     @GetMapping("/{orderNumber}")
     public Map<String, Object> getOrder(@PathVariable String orderNumber) {
         return orderCacheService.getOrLoad(orderNumber, () -> {
-            if (faultManager.isSlowSqlEnabled()) {
-                sleep(2000);
-            }
-            return jdbcTemplate.queryForMap("SELECT order_number, item_name, quantity, created_at " +
-                    "FROM lab_orders WHERE order_number = ?", orderNumber);
+            String query = faultManager.isSlowSqlEnabled() ? SLOW_ORDER_QUERY : ORDER_QUERY;
+            return jdbcTemplate.queryForMap(query, orderNumber);
         });
     }
 
@@ -52,11 +55,4 @@ public class OrderController {
                 Map.entry("blockedQueue", faultManager.blockedQueueSize()));
     }
 
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-        }
-    }
 }
