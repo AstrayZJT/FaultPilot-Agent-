@@ -7,7 +7,7 @@ public class ModelOutputInvalidException extends ModelInteractionException {
     private final ModelRole role;
 
     public ModelOutputInvalidException(ModelRole role) {
-        super("Remote Qwen returned an invalid constrained response for " + role);
+        super("Remote model returned an invalid constrained response for " + role);
         this.role = role;
     }
 

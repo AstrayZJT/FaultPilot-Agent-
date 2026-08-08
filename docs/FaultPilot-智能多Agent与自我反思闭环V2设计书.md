@@ -105,16 +105,16 @@ flowchart LR
 
 ### 5.1 模型要求
 
-所有模型角色必须使用配置的远程 Qwen 模型，默认模型为 `qwen3.7-plus`。模型密钥仅从运行进程环境变量 `QWEN_API_KEY` 读取。
+所有模型角色必须使用配置的远程 GLM 模型，默认模型为 `glm-5`。为兼容现有部署，模型密钥仍仅从运行进程环境变量 `QWEN_API_KEY` 读取。
 
 ```yaml
 faultpilot:
   model:
-    base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-    model-name: ${QWEN_MODEL:qwen3.7-plus}
+    base-url: ${MODEL_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    model-name: ${MODEL_NAME:glm-5}
     api-key: ${QWEN_API_KEY:}
     required: ${FAULTPILOT_REQUIRE_REMOTE_MODEL:true}
-    timeout-seconds: ${QWEN_TIMEOUT_SECONDS:30}
+    timeout-seconds: ${MODEL_TIMEOUT_SECONDS:30}
     temperature: 0
 ```
 

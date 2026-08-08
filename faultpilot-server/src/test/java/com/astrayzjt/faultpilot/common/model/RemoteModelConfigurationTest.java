@@ -6,14 +6,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class QwenModelConfigurationTest {
+class RemoteModelConfigurationTest {
 
     @Test
     void delegatesRetriesToTheAuditedRemoteModelClient() {
-        var properties = new QwenModelConfiguration.QwenModelProperties(
-                "http://localhost:1/v1", "qwen-test", "test-key", 0, 45, true);
+        var properties = new RemoteModelConfiguration.ModelProperties(
+                "http://localhost:1/v1", "glm-5", "test-key", 0, 45, true);
 
-        OpenAiChatModel model = (OpenAiChatModel) new QwenModelConfiguration().qwenChatModel(properties);
+        OpenAiChatModel model = (OpenAiChatModel) new RemoteModelConfiguration().remoteChatModel(properties);
 
         assertThat(ReflectionTestUtils.getField(model, "maxRetries")).isEqualTo(0);
     }

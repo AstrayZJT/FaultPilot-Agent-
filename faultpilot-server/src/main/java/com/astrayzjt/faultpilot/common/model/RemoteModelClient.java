@@ -37,7 +37,7 @@ public class RemoteModelClient {
             traceRepository.model(incidentId, taskId, "unconfigured", role.name().toLowerCase() + "-" + promptVersion,
                     null, null, Instant.now(), "FAILED");
             recordFailure(incidentId, role, promptVersion, "MODEL_NOT_CONFIGURED");
-            throw new RemoteModelUnavailableException("Remote Qwen ChatModel is not configured; set QWEN_API_KEY");
+            throw new RemoteModelUnavailableException("Remote ChatModel is not configured; set QWEN_API_KEY");
         }
         for (int attempt = 1; attempt <= 2; attempt++) {
             Instant startedAt = Instant.now();
@@ -47,7 +47,7 @@ public class RemoteModelClient {
                                 .maxOutputTokens(maxOutputTokens).build())
                         .aiMessage().text();
                 if (output == null || output.isBlank()) {
-                    throw new IllegalStateException("Remote Qwen returned an empty response");
+                    throw new IllegalStateException("Remote model returned an empty response");
                 }
                 traceRepository.model(incidentId, taskId, model.getClass().getSimpleName(),
                         role.name().toLowerCase() + "-" + promptVersion, null, null, startedAt, "SUCCEEDED");
@@ -57,11 +57,11 @@ public class RemoteModelClient {
                         role.name().toLowerCase() + "-" + promptVersion, null, null, startedAt, "FAILED");
                 if (attempt == 2) {
                     recordFailure(incidentId, role, promptVersion, "REMOTE_CALL_FAILED");
-                    throw new RemoteModelUnavailableException("Remote Qwen call failed for " + role);
+                    throw new RemoteModelUnavailableException("Remote model call failed for " + role);
                 }
             }
         }
-        throw new RemoteModelUnavailableException("Remote Qwen call failed for " + role);
+        throw new RemoteModelUnavailableException("Remote model call failed for " + role);
     }
 
     private void recordFailure(UUID incidentId, ModelRole role, String promptVersion, String code) {

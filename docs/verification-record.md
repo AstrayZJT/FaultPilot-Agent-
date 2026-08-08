@@ -185,6 +185,16 @@ Status: PASSED
 
 All scenarios above ran with FaultPilot in `PRODUCTION_READ_ONLY`; their inject/recover endpoints belong only to the target lab services. FaultPilot itself performed no remediation. Live Jaeger corroboration and production remediation handlers remain deployment-specific integrations and are intentionally not simulated as production evidence.
 
+## GLM-5 Provider Migration
+
+Status: CONFIGURED (live authorization blocked by the current credential)
+
+- The default OpenAI-compatible provider endpoint is now `https://open.bigmodel.cn/api/paas/v4`, and the default remote model is `glm-5`.
+- Existing deployments keep reading the credential from `QWEN_API_KEY`; no key is stored in application configuration, logs, tests, or Git.
+- Provider-specific Java configuration and error text were renamed to generic remote-model terminology so every Supervisor, Specialist, Diagnosis, and Critic role uses the configured GLM client.
+- `mvn -pl faultpilot-server -am test` passes all 51 server tests after the migration.
+- A direct GLM compatibility probe and incident `168c0010-57be-476e-aa01-89894f516ebb` both reached the remote-model path, but the provider returned HTTP 401 for the current environment credential. The incident therefore ended `INCONCLUSIVE` at `SUPERVISOR`; no successful GLM model call is claimed until an authorized GLM key replaces that environment value.
+
 ## Fuzzy Symptom and Self-Reflection Verification
 
 Status: PASSED (agent routing and bounded self-reflection; final result intentionally inconclusive)
