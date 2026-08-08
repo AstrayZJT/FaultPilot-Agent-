@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -180,7 +181,7 @@ public class SpecialistAgentRunner {
             return fallbackFinding(task, evidence, stepsUsed, "Remote finding call was unavailable");
         }
         try {
-            return parseFinding(task, raw, evidence, stepsUsed);
+            return normalizeDirectJvmFinding(parseFinding(task, raw, evidence, stepsUsed), task, evidence);
         } catch (RuntimeException exception) {
             Set<UUID> allowedEvidenceIds = evidence.stream().map(Evidence::evidenceId)
                     .collect(java.util.stream.Collectors.toSet());
@@ -195,7 +196,7 @@ public class SpecialistAgentRunner {
                                 "suggestedAgent must be one of " + java.util.Arrays.toString(AgentType.values()) + " or null. " +
                                 "Evidence ID arrays may contain only IDs from AllowedEvidenceIds. Never invent an ID.",
                         "Draft=" + raw + "\nAllowedEvidenceIds=" + serialize(allowedEvidenceIds), 800);
-                return parseFinding(task, repaired, evidence, stepsUsed);
+                return normalizeDirectJvmFinding(parseFinding(task, repaired, evidence, stepsUsed), task, evidence);
             } catch (RuntimeException ignored) {
                 return fallbackFinding(task, evidence, stepsUsed,
                         ignored instanceof RemoteModelUnavailableException
@@ -203,6 +204,33 @@ public class SpecialistAgentRunner {
                                 : "Both constrained finding responses were invalid");
             }
         }
+    }
+
+    private AgentFinding normalizeDirectJvmFinding(AgentFinding finding, AgentTask task, List<Evidence> evidence) {
+        if (task.agentType() != AgentType.JVM_AGENT
+                || finding.status() != FindingStatus.INSUFFICIENT_EVIDENCE
+                || finding.causeCode() != CauseCode.UNKNOWN) {
+            return finding;
+        }
+        List<Evidence> directEvidence = evidence.stream()
+                .filter(item -> item.type() == EvidenceType.THREAD_POOL_ACTIVE_AT_MAX
+                        || item.type() == EvidenceType.BLOCKING_TASK_FOUND)
+                .toList();
+        boolean hasSaturation = directEvidence.stream().anyMatch(item -> item.type() == EvidenceType.THREAD_POOL_ACTIVE_AT_MAX);
+        boolean hasBlockingTask = directEvidence.stream().anyMatch(item -> item.type() == EvidenceType.BLOCKING_TASK_FOUND);
+        if (!hasSaturation || !hasBlockingTask) {
+            return finding;
+        }
+        LinkedHashSet<UUID> supportingIds = new LinkedHashSet<>(finding.supportingEvidenceIds());
+        supportingIds.addAll(directEvidence.stream().map(Evidence::evidenceId).toList());
+        LinkedHashSet<EvidenceType> completedChecks = new LinkedHashSet<>(finding.completedChecks());
+        completedChecks.add(EvidenceType.THREAD_POOL_ACTIVE_AT_MAX);
+        completedChecks.add(EvidenceType.BLOCKING_TASK_FOUND);
+        return new AgentFinding(task.taskId(), task.agentType(), FindingStatus.SUCCEEDED,
+                CauseCode.JVM_THREAD_POOL_EXHAUSTED, List.copyOf(supportingIds), finding.counterEvidenceIds(),
+                List.copyOf(completedChecks), finding.missingChecks(), null,
+                "Direct JVM evidence shows executor saturation and blocked application threads.",
+                List.of(), "", finding.stepsUsed());
     }
 
     private AgentFinding fallbackFinding(AgentTask task, List<Evidence> evidence, int stepsUsed, String reason) {

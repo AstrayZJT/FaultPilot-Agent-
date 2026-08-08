@@ -93,6 +93,32 @@ class SpecialistAgentRunnerTest {
     }
 
     @Test
+    void promotesDirectThreadPoolAndBlockingEvidenceToJvmFinding() {
+        Fixture fixture = fixture(AgentType.JVM_AGENT, EvidenceType.THREAD_POOL_ACTIVE_AT_MAX, "thread pool saturated");
+        Evidence blocking = new Evidence(UUID.randomUUID(), fixture.task.incidentId(), fixture.task.taskId(),
+                EvidenceType.BLOCKING_TASK_FOUND, "arthas:order-service:waiting-threads", "order-service",
+                fixture.evidence.windowStart(), fixture.evidence.windowEnd(),
+                "thread=labBlockedExecutor-1 method=FaultScenarioManager.await(FaultScenarioManager.java:207)",
+                null, "hash", fixture.evidence.collectedAt());
+        String decision = "{\"action\":\"COMPLETE\",\"toolName\":null,\"arguments\":{}," +
+                "\"evidenceIds\":[],\"suggestedAgent\":null,\"decisionSummary\":\"done\"}";
+        String finding = "{\"status\":\"INSUFFICIENT_EVIDENCE\",\"causeCode\":\"UNKNOWN\"," +
+                "\"supportingEvidenceIds\":[],\"counterEvidenceIds\":[],\"completedChecks\":[]," +
+                "\"missingChecks\":[],\"suggestedAgent\":null,\"summary\":\"blocked threads need review\"}";
+        when(fixture.modelClient.complete(any(), any(), any(), anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(decision, finding);
+
+        AgentFinding result = fixture.runner.run(fixture.task, fixture.snapshot,
+                List.of(fixture.evidence, blocking));
+
+        assertThat(result.status()).isEqualTo(FindingStatus.SUCCEEDED);
+        assertThat(result.causeCode()).isEqualTo(CauseCode.JVM_THREAD_POOL_EXHAUSTED);
+        assertThat(result.supportingEvidenceIds()).contains(fixture.evidence.evidenceId(), blocking.evidenceId());
+        assertThat(result.completedChecks()).contains(EvidenceType.THREAD_POOL_ACTIVE_AT_MAX,
+                EvidenceType.BLOCKING_TASK_FOUND);
+    }
+
+    @Test
     void preservesCollectedEvidenceWhenRemoteFindingCallIsUnavailable() {
         Fixture fixture = fixture(AgentType.CACHE_AGENT, EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH,
                 "Redis client pool is saturated");

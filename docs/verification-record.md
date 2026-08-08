@@ -74,6 +74,15 @@ Live production-read-only safety check:
 - The incident completed `DIAGNOSED` with `JVM_THREAD_POOL_EXHAUSTED` while Arthas was intentionally not configured.
 - The persisted tool trace contains `query_arthas_waiting_threads` with status `SUCCEEDED` and summary `Arthas thread inspection is not configured for this service`; no false source evidence was created.
 
+Latest live source-location verification after the self-reflection fixes:
+
+- FaultPilot was restarted in `PRODUCTION_READ_ONLY` with an authenticated, loopback-only Arthas 4.3.2 connector attached to the order JVM.
+- Scenario run: `5f7fee82-33e1-475f-8c63-80eae3185a71`; immediate order-service diagnostics confirmed `threadPoolExhausted=true`, `blockedActive=4`, and `blockedQueue=20` before the Incident was created.
+- Incident: `9e2a429b-b944-4e47-bf30-2314cfd8ba39`.
+- Evidence included `THREAD_POOL_ACTIVE_AT_MAX` and `BLOCKING_TASK_FOUND`. The latter retained `FaultScenarioManager.lambda$startBlockedTasks$9(FaultScenarioManager.java:276)` and `java.util.concurrent.locks.LockSupport.park`, proving that the source-line connector is active and not merely configured.
+- The JVM Agent completed with `JVM_THREAD_POOL_EXHAUSTED` and cited the saturation plus blocking evidence. The remaining final diagnosis was `INCONCLUSIVE` because the remote Qwen Critic call returned HTTP 403 on both attempts; this was a model-provider authorization failure, not missing Arthas evidence.
+- The live run therefore passes Arthas collection and JVM finding verification, but requires an authorized Qwen key to complete the final Critic/EvidenceGate `CONFIRMED` path.
+
 ## Production Read-Only Adapter Coverage
 
 Status: PASSED (automated tests; live backend credentials and endpoints are deployment-specific)
@@ -169,6 +178,8 @@ Status: PASSED
 - A failed Specialist final-summary call now preserves collected Evidence in a conservative fallback Finding instead of failing the entire Incident.
 - Redis, database, downstream, JVM, and thread-pool direct evidence aliases normalize to catalog cause codes without accepting unknown Evidence IDs.
 - Diagnosis and Critic prompts distinguish direct signals from optional corroboration and treat uncited Agent prose as unaudited context.
+- Critic-requested follow-up agents are now enforced by the Supervisor plan validator, so a model cannot replace a targeted JVM follow-up with an unrelated Agent.
+- A JVM finding with direct `THREAD_POOL_ACTIVE_AT_MAX` plus `BLOCKING_TASK_FOUND` evidence is normalized to `JVM_THREAD_POOL_EXHAUSTED` rather than being downgraded to `UNKNOWN`; the EvidenceGate still remains the final confidence authority.
 - The slow SQL laboratory now executes the delay inside PostgreSQL so `pg_stat_statements` can observe it.
 - Slow-statement detection checks both mean and maximum execution time, preventing intermittent outliers from being hidden by historical averages.
 

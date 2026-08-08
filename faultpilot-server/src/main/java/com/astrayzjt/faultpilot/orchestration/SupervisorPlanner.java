@@ -7,6 +7,7 @@ import com.astrayzjt.faultpilot.common.domain.RoutingSignal;
 import com.astrayzjt.faultpilot.common.domain.ModelRole;
 import com.astrayzjt.faultpilot.common.domain.AgentFinding;
 import com.astrayzjt.faultpilot.common.domain.DiagnosisCritique;
+import com.astrayzjt.faultpilot.common.domain.CriticVerdict;
 import com.astrayzjt.faultpilot.common.model.RemoteModelClient;
 import com.astrayzjt.faultpilot.common.model.ModelOutputInvalidException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -52,16 +53,34 @@ public class SupervisorPlanner {
         String raw = modelClient.complete(snapshot.incidentId(), null, ModelRole.SUPERVISOR,
                 "plan-v2", system, user, 600);
         try {
-            return parse(raw);
+            return enforceCriticFollowUp(parse(raw), latestCritique, round);
         } catch (RuntimeException exception) {
             String repaired = modelClient.complete(snapshot.incidentId(), null, ModelRole.SUPERVISOR,
                     "plan-repair-v2", "Return only a valid JSON object matching the requested InvestigationPlan schema. Do not add commentary.", raw, 600);
             try {
-                return parse(repaired);
+                return enforceCriticFollowUp(parse(repaired), latestCritique, round);
             } catch (RuntimeException ignored) {
                 throw new ModelOutputInvalidException(ModelRole.SUPERVISOR);
             }
         }
+    }
+
+    InvestigationPlan enforceCriticFollowUp(InvestigationPlan plan, DiagnosisCritique critique, int round) {
+        if (round <= 1 || critique == null || critique.verdict() != CriticVerdict.FOLLOW_UP) {
+            return plan;
+        }
+        var requested = critique.issues().stream()
+                .filter(issue -> issue.suggestedAgent() != null)
+                .findFirst()
+                .orElse(null);
+        if (requested == null) {
+            return plan;
+        }
+        String objective = requested.summary().isBlank()
+                ? "Complete the Critic-requested follow-up investigation"
+                : "Complete the Critic-requested follow-up: " + requested.summary();
+        return new InvestigationPlan(List.of(new AgentTaskDraft(requested.suggestedAgent(), objective,
+                requested.evidenceIds())), plan.reason() + "; Critic follow-up enforced for " + requested.suggestedAgent());
     }
 
     InvestigationPlan parse(String raw) {
