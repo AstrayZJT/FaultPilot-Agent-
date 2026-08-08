@@ -52,6 +52,8 @@ flowchart LR
 
 ## 4. 第 1 天：架构与 Incident 主链路
 
+详细执行表见：[FaultPilot 第 1 天细分学习计划](FaultPilot-第1天细分学习计划.md)。
+
 ### 4.1 学习目标
 
 - 认识四个 Maven 模块及其运行关系。
