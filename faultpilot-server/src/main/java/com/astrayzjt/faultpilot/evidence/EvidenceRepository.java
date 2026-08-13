@@ -6,8 +6,8 @@ import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -31,14 +31,47 @@ public class EvidenceRepository {
         return saveOrReuse(evidence, null);
     }
 
+    @Transactional
     public Evidence saveOrReuseDelegated(Evidence evidence, UUID delegationId) {
         if (delegationId == null || !delegationId.equals(evidence.producerTaskId())) {
             throw new IllegalArgumentException("Delegated Evidence must reference its delegation task");
         }
+        if (evidence.runId() == null || evidence.toolCallId() == null || evidence.toolCallId().isBlank()) {
+            throw new IllegalArgumentException("Delegated Evidence must contain a Run and Tool call ID");
+        }
+
+        Optional<DelegatedToolCallReceipt> receipt = findReceipt(evidence.runId(), evidence.toolCallId());
+        if (receipt.isPresent()) {
+            requireSameReceipt(receipt.get(), evidence, delegationId);
+            Evidence saved = findActiveById(receipt.get().evidenceId())
+                    .orElseThrow(() -> new IllegalStateException("Delegated Tool call receipt points to missing Evidence"));
+            requireReceiptEvidence(saved, evidence, delegationId);
+            linkDelegationEvidence(delegationId, saved.evidenceId());
+            return saved;
+        }
+
         Evidence saved = saveOrReuse(evidence, delegationId);
-        jdbcTemplate.update("INSERT INTO agent_delegation_evidence_link(delegation_id,evidence_id) VALUES (?,?) " +
-                "ON CONFLICT (delegation_id,evidence_id) DO NOTHING", delegationId, saved.evidenceId());
+        int receiptInserted = jdbcTemplate.update("INSERT INTO delegated_tool_call_receipt " +
+                        "(run_id,delegation_id,tool_call_id,evidence_id,agent_id,tool_id,capability_version,created_at) " +
+                        "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP) " +
+                        "ON CONFLICT (run_id,tool_call_id) DO NOTHING",
+                evidence.runId(), delegationId, evidence.toolCallId(), saved.evidenceId(), evidence.agentId(),
+                evidence.toolId(), evidence.capabilityVersion());
+        if (receiptInserted == 0) {
+            DelegatedToolCallReceipt raced = findReceipt(evidence.runId(), evidence.toolCallId())
+                    .orElseThrow(() -> new IllegalStateException("Concurrent Tool call receipt was not persisted"));
+            requireSameReceipt(raced, evidence, delegationId);
+            saved = findActiveById(raced.evidenceId())
+                    .orElseThrow(() -> new IllegalStateException("Delegated Tool call receipt points to missing Evidence"));
+            requireReceiptEvidence(saved, evidence, delegationId);
+        }
+        linkDelegationEvidence(delegationId, saved.evidenceId());
         return saved;
+    }
+
+    private void linkDelegationEvidence(UUID delegationId, UUID evidenceId) {
+        jdbcTemplate.update("INSERT INTO agent_delegation_evidence_link(delegation_id,evidence_id) VALUES (?,?) " +
+                "ON CONFLICT (delegation_id,evidence_id) DO NOTHING", delegationId, evidenceId);
     }
 
     private Evidence saveOrReuse(Evidence evidence, UUID delegationId) {
@@ -58,34 +91,34 @@ public class EvidenceRepository {
         if (existing.isPresent()) {
             return existing.get();
         }
-        try {
-            jdbcTemplate.update("INSERT INTO evidence_record " +
-                            "(id,incident_id,producer_task_id,evidence_type,source,entity,window_start,window_end,summary," +
-                            "raw_data_reference,content_hash,collected_at,run_id,agent_id,tool_id,tool_call_id," +
-                            "capability_version,evidence_status,structured_data_json,delegation_id) " +
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)",
-                    evidence.evidenceId(), evidence.incidentId(), delegationId == null ? evidence.producerTaskId() : null,
-                    evidence.type().name(), evidence.source(), evidence.entity(), timestamp(evidence.windowStart()),
-                    timestamp(evidence.windowEnd()), evidence.summary(), evidence.rawDataReference(),
-                    evidence.contentHash(), timestamp(evidence.collectedAt()), evidence.runId(), evidence.agentId(),
-                    evidence.toolId(), evidence.toolCallId(), evidence.capabilityVersion(), evidence.status().name(),
-                    json(evidence.structuredData()), delegationId);
+        int inserted = jdbcTemplate.update("INSERT INTO evidence_record " +
+                        "(id,incident_id,producer_task_id,evidence_type,source,entity,window_start,window_end,summary," +
+                        "raw_data_reference,content_hash,collected_at,run_id,agent_id,tool_id,tool_call_id," +
+                        "capability_version,evidence_status,structured_data_json,delegation_id) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?) ON CONFLICT DO NOTHING",
+                evidence.evidenceId(), evidence.incidentId(), delegationId == null ? evidence.producerTaskId() : null,
+                evidence.type().name(), evidence.source(), evidence.entity(), timestamp(evidence.windowStart()),
+                timestamp(evidence.windowEnd()), evidence.summary(), evidence.rawDataReference(),
+                evidence.contentHash(), timestamp(evidence.collectedAt()), evidence.runId(), evidence.agentId(),
+                evidence.toolId(), evidence.toolCallId(), evidence.capabilityVersion(), evidence.status().name(),
+                json(evidence.structuredData()), delegationId);
+        if (inserted == 1) {
             return evidence;
-        } catch (DuplicateKeyException concurrent) {
-            Optional<Evidence> racedCall = findByToolCall(evidence);
-            if (racedCall.isPresent()) {
-                requireSameToolCall(racedCall.get(), evidence);
-                return racedCall.get();
-            }
-            Optional<Evidence> racedContent = evidence.runId() == null
-                    ? query(BASE_SELECT + " WHERE incident_id=? AND run_id IS NULL AND evidence_status='ACTIVE' " +
-                                    "AND evidence_type=? AND source=? AND content_hash=?", evidence.incidentId(),
-                            evidence.type().name(), evidence.source(), evidence.contentHash()).stream().findFirst()
-                    : query(BASE_SELECT + " WHERE run_id=? AND evidence_status='ACTIVE' AND evidence_type=? " +
-                                    "AND source=? AND content_hash=?", evidence.runId(), evidence.type().name(),
-                            evidence.source(), evidence.contentHash()).stream().findFirst();
-            return racedContent.orElseThrow(() -> concurrent);
         }
+        Optional<Evidence> racedCall = findByToolCall(evidence);
+        if (racedCall.isPresent()) {
+            requireSameToolCall(racedCall.get(), evidence);
+            return racedCall.get();
+        }
+        Optional<Evidence> racedContent = evidence.runId() == null
+                ? query(BASE_SELECT + " WHERE incident_id=? AND run_id IS NULL AND evidence_status='ACTIVE' " +
+                                "AND evidence_type=? AND source=? AND content_hash=?", evidence.incidentId(),
+                        evidence.type().name(), evidence.source(), evidence.contentHash()).stream().findFirst()
+                : query(BASE_SELECT + " WHERE run_id=? AND evidence_status='ACTIVE' AND evidence_type=? " +
+                                "AND source=? AND content_hash=?", evidence.runId(), evidence.type().name(),
+                        evidence.source(), evidence.contentHash()).stream().findFirst();
+        return racedContent.orElseThrow(() -> new IllegalStateException(
+                "Evidence insert was ignored but no matching active Evidence was found"));
     }
 
     private Optional<Evidence> findByToolCall(Evidence evidence) {
@@ -94,6 +127,42 @@ public class EvidenceRepository {
         }
         return query(BASE_SELECT + " WHERE run_id=? AND tool_call_id=? AND evidence_status='ACTIVE'",
                 evidence.runId(), evidence.toolCallId()).stream().findFirst();
+    }
+
+    private Optional<Evidence> findActiveById(UUID evidenceId) {
+        return query(BASE_SELECT + " WHERE id=? AND evidence_status='ACTIVE'", evidenceId).stream().findFirst();
+    }
+
+    private Optional<DelegatedToolCallReceipt> findReceipt(UUID runId, String toolCallId) {
+        return jdbcTemplate.query("SELECT run_id,delegation_id,tool_call_id,evidence_id,agent_id,tool_id," +
+                        "capability_version FROM delegated_tool_call_receipt WHERE run_id=? AND tool_call_id=?",
+                (rs, row) -> new DelegatedToolCallReceipt(rs.getObject("run_id", UUID.class),
+                        rs.getObject("delegation_id", UUID.class), rs.getString("tool_call_id"),
+                        rs.getObject("evidence_id", UUID.class), rs.getString("agent_id"),
+                        rs.getString("tool_id"), rs.getString("capability_version")), runId, toolCallId)
+                .stream().findFirst();
+    }
+
+    private void requireSameReceipt(DelegatedToolCallReceipt receipt, Evidence incoming, UUID delegationId) {
+        if (!receipt.runId().equals(incoming.runId()) || !receipt.delegationId().equals(delegationId)
+                || !receipt.toolCallId().equals(incoming.toolCallId())
+                || !java.util.Objects.equals(receipt.agentId(), incoming.agentId())
+                || !java.util.Objects.equals(receipt.toolId(), incoming.toolId())
+                || !java.util.Objects.equals(receipt.capabilityVersion(), incoming.capabilityVersion())) {
+            throw new IllegalArgumentException("Delegated Tool call receipt identity mismatch");
+        }
+    }
+
+    private void requireReceiptEvidence(Evidence saved, Evidence incoming, UUID delegationId) {
+        if (!saved.incidentId().equals(incoming.incidentId()) || !saved.runId().equals(incoming.runId())
+                || saved.status() != EvidenceStatus.ACTIVE || saved.type() != incoming.type()
+                || !java.util.Objects.equals(saved.source(), incoming.source())) {
+            throw new IllegalArgumentException("Delegated Tool call receipt points to incompatible Evidence");
+        }
+    }
+
+    private record DelegatedToolCallReceipt(UUID runId, UUID delegationId, String toolCallId, UUID evidenceId,
+                                            String agentId, String toolId, String capabilityVersion) {
     }
 
     private void requireSameToolCall(Evidence existing, Evidence incoming) {

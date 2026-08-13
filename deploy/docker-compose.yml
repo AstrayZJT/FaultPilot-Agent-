@@ -65,6 +65,46 @@ services:
       redis:
         condition: service_healthy
 
+  jvm-agent:
+    profiles: ["distributed-agents"]
+    build:
+      context: ..
+      dockerfile: faultpilot-agent-jvm/Dockerfile
+    container_name: faultpilot-agent-jvm
+    restart: unless-stopped
+    environment:
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_NAME: ${MODEL_NAME:-qwen3.7-max}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-90}
+      JVM_AGENT_A2A_TOKEN: ${JVM_AGENT_A2A_TOKEN:-}
+      FAULTPILOT_AGENT_API_TOKEN: ${FAULTPILOT_AGENT_API_TOKEN:-}
+      FAULTPILOT_INTERNAL_URL: ${FAULTPILOT_INTERNAL_URL:-http://host.docker.internal:8080}
+      JVM_AGENT_PUBLIC_URL: ${JVM_AGENT_PUBLIC_URL:-http://localhost:8091/a2a}
+      JVM_AGENT_CAPABILITY_VERSION: ${JVM_AGENT_CAPABILITY_VERSION:-1.0.0}
+      JVM_AGENT_DB_URL: jdbc:h2:file:/app/data/jvm-agent;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=TRUE
+      PROMETHEUS_URL: http://prometheus:9090
+      ORDER_SERVICE_PROMETHEUS_JOB: ${ORDER_SERVICE_PROMETHEUS_JOB:-faultpilot-lab-order}
+      ORDER_SERVICE_ARTHAS_URL: ${ORDER_SERVICE_ARTHAS_URL:-}
+      ORDER_SERVICE_ARTHAS_USERNAME: ${ORDER_SERVICE_ARTHAS_USERNAME:-}
+      ORDER_SERVICE_ARTHAS_PASSWORD: ${ORDER_SERVICE_ARTHAS_PASSWORD:-}
+      ORDER_SERVICE_CODE_PACKAGE_PREFIX: ${ORDER_SERVICE_CODE_PACKAGE_PREFIX:-}
+      INVENTORY_SERVICE_PROMETHEUS_JOB: ${INVENTORY_SERVICE_PROMETHEUS_JOB:-faultpilot-lab-inventory}
+      INVENTORY_SERVICE_ARTHAS_URL: ${INVENTORY_SERVICE_ARTHAS_URL:-}
+      INVENTORY_SERVICE_ARTHAS_USERNAME: ${INVENTORY_SERVICE_ARTHAS_USERNAME:-}
+      INVENTORY_SERVICE_ARTHAS_PASSWORD: ${INVENTORY_SERVICE_ARTHAS_PASSWORD:-}
+      INVENTORY_SERVICE_CODE_PACKAGE_PREFIX: ${INVENTORY_SERVICE_CODE_PACKAGE_PREFIX:-}
+    ports:
+      - "${JVM_AGENT_PORT:-8091}:8091"
+    volumes:
+      - faultpilot-jvm-agent-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      prometheus:
+        condition: service_started
+
 volumes:
   faultpilot-postgres-data:
   faultpilot-prometheus-data:
+  faultpilot-jvm-agent-data:

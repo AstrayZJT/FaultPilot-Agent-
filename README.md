@@ -1,6 +1,6 @@
 # FaultPilot
 
-FaultPilot is a Java 21 multi-agent incident diagnosis and safe remediation system for microservices. The implementation follows the project design in `docs/FaultPilot-多Agent微服务故障诊断与安全处置系统设计书.md`.
+FaultPilot is a Java 21 multi-agent incident diagnosis and safe remediation system for microservices.
 
 ## Current Stage
 
@@ -8,7 +8,8 @@ The MVP implementation covers the design stages 0-7: reproducible fault labs, re
 
 Modules:
 
-- `faultpilot-server`: incident orchestration service
+- `faultpilot-server`: LangGraph4j main-Agent loop, delegation, Evidence ownership, and final summaries
+- `faultpilot-agent-jvm`: independently deployable A2A JVM specialist with an internal Skill/Tool loop
 - `faultpilot-lab-order`: order-service fault laboratory
 - `faultpilot-lab-inventory`: inventory-service fault laboratory
 - `faultpilot-evaluation`: fixed evaluation runner
@@ -30,6 +31,8 @@ $env:MODEL_TIMEOUT_SECONDS = "90"
 $env:FAULTPILOT_SECURITY_VIEWER_PASSWORD = "<viewer-password>"
 $env:FAULTPILOT_SECURITY_OPERATOR_PASSWORD = "<operator-password>"
 $env:ALERTMANAGER_WEBHOOK_TOKEN = "<webhook-token>"
+$env:FAULTPILOT_AGENT_API_TOKEN = "<shared-internal-api-token>"
+$env:JVM_AGENT_A2A_TOKEN = "<shared-a2a-token>"
 ```
 
 The key is intentionally absent from the repository. Do not put it in `application.yml`, `.env.example`, logs, or commits.
@@ -56,6 +59,10 @@ Run the server locally after infrastructure is available:
 ```powershell
 mvn -pl faultpilot-server spring-boot:run
 ```
+
+To use the distributed JVM specialist, start `faultpilot-agent-jvm` first and set
+`FAULTPILOT_SPECIALIST_TRANSPORT=A2A` for the central server. See
+[`faultpilot-agent-jvm/README.md`](faultpilot-agent-jvm/README.md) for the complete start order and environment contract.
 
 The operator console is at `http://localhost:8080/`. It uses form login, Session cookies, and CSRF. API automation can use Basic authentication after obtaining the CSRF token from `/api/security/csrf`. The server never creates an action from model text: remediation is selected by the deterministic Cause Catalog and waits at `WAITING_ACTION_CONFIRMATION`.
 
