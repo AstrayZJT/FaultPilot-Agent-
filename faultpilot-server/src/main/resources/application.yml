@@ -61,6 +61,32 @@ faultpilot:
           bearer-token: ${TRACE_DIAGNOSTIC_API_TOKEN:}
   integration:
     mode: ${FAULTPILOT_INTEGRATION_MODE:LAB}
+  agents:
+    transport: ${FAULTPILOT_SPECIALIST_TRANSPORT:LOCAL}
+    timeout-seconds: ${FAULTPILOT_AGENT_DISCOVERY_TIMEOUT_SECONDS:5}
+    protocol-version: "1.0"
+    local-versions:
+      JVM_AGENT: ${JVM_AGENT_CAPABILITY_VERSION:local-1.0.0}
+      DATABASE_AGENT: ${DATABASE_AGENT_CAPABILITY_VERSION:local-1.0.0}
+      CACHE_AGENT: ${CACHE_AGENT_CAPABILITY_VERSION:local-1.0.0}
+      DEPENDENCY_AGENT: ${DEPENDENCY_AGENT_CAPABILITY_VERSION:local-1.0.0}
+    endpoints:
+      jvm-agent:
+        agent-type: JVM_AGENT
+        card-url: ${JVM_AGENT_CARD_URL:http://localhost:8091/.well-known/agent-card.json}
+        required: true
+      database-agent:
+        agent-type: DATABASE_AGENT
+        card-url: ${DATABASE_AGENT_CARD_URL:http://localhost:8092/.well-known/agent-card.json}
+        required: false
+      cache-agent:
+        agent-type: CACHE_AGENT
+        card-url: ${CACHE_AGENT_CARD_URL:http://localhost:8093/.well-known/agent-card.json}
+        required: false
+      dependency-agent:
+        agent-type: DEPENDENCY_AGENT
+        card-url: ${DEPENDENCY_AGENT_CARD_URL:http://localhost:8094/.well-known/agent-card.json}
+        required: false
   agent:
     specialist-deadline-seconds: ${FAULTPILOT_SPECIALIST_DEADLINE_SECONDS:120}
   observability:
