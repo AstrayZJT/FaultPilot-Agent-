@@ -1,0 +1,36 @@
+apiVersion: faultpilot/v1
+kind: DiagnosticTool
+metadata:
+  name: query_prometheus_thread_pool
+  version: 1.0.0
+spec:
+  ownerAgent: JVM_AGENT
+  description: Compute the bounded active-to-pool-size ratio for the target executor.
+  endpoint:
+    ref: prometheus
+    path: /api/v1/query
+    method: GET
+  request:
+    prometheus:
+      queryTemplate: 'max(executor_active_threads{${selector}}) / clamp_min(max(executor_pool_size_threads{${selector}}), 1)'
+    query: {}
+    body: {}
+  response:
+    parser: JSON
+    resultPath: data.result
+    valuePath: value[1]
+    aggregation: MAX
+    emptyStatus: DATA_UNAVAILABLE
+    evidence:
+      rule: THRESHOLD
+      thresholdFrom: threadPoolSaturation
+      trueType: THREAD_POOL_ACTIVE_AT_MAX
+      falseType: THREAD_POOL_NORMAL
+      trueSummary: Executor active threads are near pool capacity
+      falseSummary: Executor metrics are within normal range
+      sourceTemplate: prometheus:{serviceName}:executor
+  limits:
+    timeoutSeconds: 5
+    maxResponseBytes: 65536
+    maxItems: 20
+  riskLevel: READ_ONLY

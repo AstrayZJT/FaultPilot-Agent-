@@ -1,0 +1,33 @@
+apiVersion: faultpilot/v1
+kind: DiagnosticTool
+metadata:
+  name: query_arthas_hot_threads
+  version: 1.0.0
+spec:
+  ownerAgent: JVM_AGENT
+  description: Execute the fixed bounded Arthas hot-thread command and locate application source frames.
+  endpoint:
+    ref: arthas
+    path: /api
+    method: POST
+  request:
+    query: {}
+    body:
+      action:
+        value: exec
+      command:
+        value: thread -n 8
+  response:
+    parser: ARTHAS_HOT_THREADS
+    resultPath: body.results
+    aggregation: COUNT
+    evidence:
+      rule: NON_EMPTY
+      trueType: CPU_HOT_METHOD_FOUND
+      trueSummary: Arthas identified hot application thread(s)
+      sourceTemplate: arthas:{serviceName}:hot-threads
+  limits:
+    timeoutSeconds: 8
+    maxResponseBytes: 262144
+    maxItems: 8
+  riskLevel: READ_ONLY

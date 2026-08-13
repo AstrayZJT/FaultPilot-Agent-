@@ -6,6 +6,7 @@ import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import java.sql.SQLException;
@@ -41,6 +42,11 @@ public class EvidenceRepository {
     }
 
     private Evidence saveOrReuse(Evidence evidence, UUID delegationId) {
+        Optional<Evidence> sameCall = findByToolCall(evidence);
+        if (sameCall.isPresent()) {
+            requireSameToolCall(sameCall.get(), evidence);
+            return sameCall.get();
+        }
         Optional<Evidence> existing = evidence.runId() == null
                 ? query(BASE_SELECT + " WHERE incident_id=? AND run_id IS NULL AND evidence_status='ACTIVE' " +
                                 "AND evidence_type=? AND source=? AND content_hash=?",
@@ -52,18 +58,52 @@ public class EvidenceRepository {
         if (existing.isPresent()) {
             return existing.get();
         }
-        jdbcTemplate.update("INSERT INTO evidence_record " +
-                        "(id,incident_id,producer_task_id,evidence_type,source,entity,window_start,window_end,summary," +
-                        "raw_data_reference,content_hash,collected_at,run_id,agent_id,tool_id,tool_call_id," +
-                        "capability_version,evidence_status,structured_data_json,delegation_id) " +
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)",
-                evidence.evidenceId(), evidence.incidentId(), delegationId == null ? evidence.producerTaskId() : null,
-                evidence.type().name(),
-                evidence.source(), evidence.entity(), timestamp(evidence.windowStart()), timestamp(evidence.windowEnd()),
-                evidence.summary(), evidence.rawDataReference(), evidence.contentHash(), timestamp(evidence.collectedAt()),
-                evidence.runId(), evidence.agentId(), evidence.toolId(), evidence.toolCallId(), evidence.capabilityVersion(),
-                evidence.status().name(), json(evidence.structuredData()), delegationId);
-        return evidence;
+        try {
+            jdbcTemplate.update("INSERT INTO evidence_record " +
+                            "(id,incident_id,producer_task_id,evidence_type,source,entity,window_start,window_end,summary," +
+                            "raw_data_reference,content_hash,collected_at,run_id,agent_id,tool_id,tool_call_id," +
+                            "capability_version,evidence_status,structured_data_json,delegation_id) " +
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)",
+                    evidence.evidenceId(), evidence.incidentId(), delegationId == null ? evidence.producerTaskId() : null,
+                    evidence.type().name(), evidence.source(), evidence.entity(), timestamp(evidence.windowStart()),
+                    timestamp(evidence.windowEnd()), evidence.summary(), evidence.rawDataReference(),
+                    evidence.contentHash(), timestamp(evidence.collectedAt()), evidence.runId(), evidence.agentId(),
+                    evidence.toolId(), evidence.toolCallId(), evidence.capabilityVersion(), evidence.status().name(),
+                    json(evidence.structuredData()), delegationId);
+            return evidence;
+        } catch (DuplicateKeyException concurrent) {
+            Optional<Evidence> racedCall = findByToolCall(evidence);
+            if (racedCall.isPresent()) {
+                requireSameToolCall(racedCall.get(), evidence);
+                return racedCall.get();
+            }
+            Optional<Evidence> racedContent = evidence.runId() == null
+                    ? query(BASE_SELECT + " WHERE incident_id=? AND run_id IS NULL AND evidence_status='ACTIVE' " +
+                                    "AND evidence_type=? AND source=? AND content_hash=?", evidence.incidentId(),
+                            evidence.type().name(), evidence.source(), evidence.contentHash()).stream().findFirst()
+                    : query(BASE_SELECT + " WHERE run_id=? AND evidence_status='ACTIVE' AND evidence_type=? " +
+                                    "AND source=? AND content_hash=?", evidence.runId(), evidence.type().name(),
+                            evidence.source(), evidence.contentHash()).stream().findFirst();
+            return racedContent.orElseThrow(() -> concurrent);
+        }
+    }
+
+    private Optional<Evidence> findByToolCall(Evidence evidence) {
+        if (evidence.runId() == null || evidence.toolCallId() == null || evidence.toolCallId().isBlank()) {
+            return Optional.empty();
+        }
+        return query(BASE_SELECT + " WHERE run_id=? AND tool_call_id=? AND evidence_status='ACTIVE'",
+                evidence.runId(), evidence.toolCallId()).stream().findFirst();
+    }
+
+    private void requireSameToolCall(Evidence existing, Evidence incoming) {
+        if (!existing.incidentId().equals(incoming.incidentId()) || existing.type() != incoming.type()
+                || !java.util.Objects.equals(existing.producerTaskId(), incoming.producerTaskId())
+                || !java.util.Objects.equals(existing.agentId(), incoming.agentId())
+                || !java.util.Objects.equals(existing.toolId(), incoming.toolId())
+                || !java.util.Objects.equals(existing.capabilityVersion(), incoming.capabilityVersion())) {
+            throw new IllegalArgumentException("Tool call ID was reused for different Evidence");
+        }
     }
 
     public List<Evidence> findByIncident(UUID incidentId) {

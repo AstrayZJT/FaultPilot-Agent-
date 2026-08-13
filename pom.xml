@@ -20,6 +20,7 @@
 
     <modules>
         <module>faultpilot-server</module>
+        <module>faultpilot-agent-jvm</module>
         <module>faultpilot-lab-order</module>
         <module>faultpilot-lab-inventory</module>
         <module>faultpilot-evaluation</module>
