@@ -15,6 +15,7 @@ import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.CauseCode;
 import com.astrayzjt.faultpilot.common.domain.DiagnosisStatus;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
+import com.astrayzjt.faultpilot.common.domain.EvidenceStatus;
 import com.astrayzjt.faultpilot.common.domain.EvidenceType;
 import com.astrayzjt.faultpilot.common.domain.IncidentSnapshot;
 import com.astrayzjt.faultpilot.common.domain.TimeRange;
@@ -99,9 +100,10 @@ class MainAgentDecisionGuardTest {
                 BaselineStatus.COMPLETED, null, now.minusSeconds(2), null, 1);
         IncidentSnapshot incident = new IncidentSnapshot(incidentId, "order-service", "requests are slow", null,
                 new TimeRange(now.minusSeconds(60), now), null, null, null, false, now);
-        Evidence evidence = new Evidence(UUID.randomUUID(), incidentId, null, EvidenceType.PROCESS_CPU_HIGH,
-                "prometheus:order-service:process_cpu_usage", "order-service", now.minusSeconds(60), now,
-                "Process CPU is high", null, "hash", now);
+        Evidence evidence = new Evidence(UUID.randomUUID(), incidentId, null, runId, "jvm-agent",
+                "query_prometheus_process_cpu", "baseline:jvm:cpu", "jvm-1.0.0", EvidenceStatus.ACTIVE,
+                EvidenceType.PROCESS_CPU_HIGH, "prometheus:order-service:process_cpu_usage", "order-service",
+                now.minusSeconds(60), now, "Process CPU is high", null, "hash", java.util.Map.of(), now);
         MainAgentContext context = new MainAgentContext(incident, run, capabilities.currentSnapshot(),
                 List.of(evidence), delegations, 1, 4, 8, now.plusSeconds(60));
         return new Fixture(context, evidence);

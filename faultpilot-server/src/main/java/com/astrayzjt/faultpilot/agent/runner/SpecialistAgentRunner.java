@@ -86,7 +86,11 @@ public class SpecialistAgentRunner {
                 break;
             }
             ToolResult result = invokeTool(task, snapshot, deadline, decision, calledTools, stepId);
-            Evidence evidence = evidenceService.record(task.incidentId(), task.taskId(), result,
+            Evidence evidence = task.runId() == null
+                    ? evidenceService.record(task.incidentId(), task.taskId(), result,
+                    snapshot.timeRange().start(), snapshot.timeRange().end())
+                    : evidenceService.record(task.runId(), task.incidentId(), task.taskId(), task.agentId(),
+                    task.capabilityVersion(), decision.toolName(), stepId.toString(), result,
                     snapshot.timeRange().start(), snapshot.timeRange().end());
             UUID evidenceId = evidence == null ? null : evidence.evidenceId();
             if (evidence != null && collected.stream().noneMatch(item -> item.evidenceId().equals(evidence.evidenceId()))) {

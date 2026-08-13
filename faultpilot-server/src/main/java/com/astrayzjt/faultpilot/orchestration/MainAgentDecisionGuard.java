@@ -48,6 +48,10 @@ public final class MainAgentDecisionGuard {
                 if (!context.incident().incidentId().equals(item.incidentId())) {
                     throw new IllegalArgumentException("Evidence belongs to another Incident");
                 }
+                if (!context.run().runId().equals(item.runId())
+                        || item.status() != com.astrayzjt.faultpilot.common.domain.EvidenceStatus.ACTIVE) {
+                    throw new IllegalArgumentException("Evidence is not ACTIVE in the current investigation Run");
+                }
                 availableEvidence.add(item.evidenceId());
         }
         if (!availableEvidence.containsAll(decision.evidenceIds())) {

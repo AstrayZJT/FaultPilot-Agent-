@@ -1,6 +1,8 @@
 package com.astrayzjt.faultpilot.triage;
 
 import com.astrayzjt.faultpilot.common.domain.AgentType;
+import com.astrayzjt.faultpilot.agent.distributed.domain.AgentCapability;
+import com.astrayzjt.faultpilot.agent.distributed.domain.CapabilitySnapshot;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
 import com.astrayzjt.faultpilot.common.domain.Incident;
 import com.astrayzjt.faultpilot.evidence.EvidenceService;
@@ -15,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class BaselineCollector {
@@ -40,6 +43,10 @@ public class BaselineCollector {
     }
 
     public List<Evidence> collect(Incident incident) {
+        return collect(incident, null, null);
+    }
+
+    public List<Evidence> collect(Incident incident, UUID runId, CapabilitySnapshot capabilitySnapshot) {
         Instant deadline = Instant.now().plusSeconds(8);
         List<Evidence> recorded = new ArrayList<>();
         for (BaselineProbe probe : PROBES) {
@@ -49,7 +56,14 @@ public class BaselineCollector {
                     .toList();
             for (String name : availableTools) {
                 ToolResult result = execute(probe.owner(), name, incident, deadline);
-                Evidence evidence = evidenceService.record(incident.incidentId(), null, result,
+                AgentCapability capability = capability(capabilitySnapshot, probe.owner());
+                Evidence evidence = runId == null
+                        ? evidenceService.record(incident.incidentId(), null, result,
+                        incident.snapshot().timeRange().start(), incident.snapshot().timeRange().end())
+                        : evidenceService.record(runId, incident.incidentId(), null,
+                        capability == null ? "baseline" : capability.agentId(),
+                        capability == null ? "unknown" : capability.capabilityVersion(), name,
+                        "baseline:" + probe.owner() + ":" + name, result,
                         incident.snapshot().timeRange().start(), incident.snapshot().timeRange().end());
                 if (evidence != null) {
                     recorded.add(evidence);
@@ -57,6 +71,13 @@ public class BaselineCollector {
             }
         }
         return List.copyOf(recorded);
+    }
+
+    private AgentCapability capability(CapabilitySnapshot snapshot, AgentType type) {
+        if (snapshot == null) {
+            return null;
+        }
+        return snapshot.agents().stream().filter(candidate -> candidate.agentType() == type).findFirst().orElse(null);
     }
 
     @SuppressWarnings("unchecked")

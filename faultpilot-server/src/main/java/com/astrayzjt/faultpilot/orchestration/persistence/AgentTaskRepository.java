@@ -29,7 +29,7 @@ public class AgentTaskRepository {
     public void insert(AgentTask task) {
         jdbcTemplate.update("INSERT INTO agent_task_run " +
                         "(id,incident_id,task_key,agent_type,objective,status,max_steps,investigation_round) " +
-                        "VALUES (?,?,?,?,?,?,?,?)", task.taskId(), task.incidentId(), task.taskKey(),
+                        "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING", task.taskId(), task.incidentId(), task.taskKey(),
                 task.agentType().name(), task.objective(), task.status().name(), task.maxSteps(), task.investigationRound());
     }
 
@@ -56,6 +56,11 @@ public class AgentTaskRepository {
     public List<AgentFinding> findFindingsByIncident(UUID incidentId) {
         return jdbcTemplate.query("SELECT finding_json FROM agent_task_run WHERE incident_id=? AND finding_json IS NOT NULL " +
                         "ORDER BY investigation_round, completed_at", (rs, row) -> readFinding(rs.getString("finding_json")), incidentId);
+    }
+
+    public java.util.Optional<AgentFinding> findFinding(UUID taskId) {
+        return jdbcTemplate.query("SELECT finding_json FROM agent_task_run WHERE id=? AND finding_json IS NOT NULL",
+                (rs, row) -> readFinding(rs.getString("finding_json")), taskId).stream().findFirst();
     }
 
     public List<InvestigationDetail.AgentTaskSummary> findTaskSummariesByIncident(UUID incidentId) {
