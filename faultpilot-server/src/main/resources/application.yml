@@ -124,6 +124,7 @@ faultpilot:
     operator-password: ${FAULTPILOT_SECURITY_OPERATOR_PASSWORD:}
     admin-password: ${FAULTPILOT_SECURITY_ADMIN_PASSWORD:}
     alertmanager-token: ${FAULTPILOT_SECURITY_ALERTMANAGER_TOKEN:}
+    agent-token: ${FAULTPILOT_AGENT_API_TOKEN:}
   catalog:
     services:
       order-service:

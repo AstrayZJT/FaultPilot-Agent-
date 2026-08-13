@@ -27,6 +27,20 @@ public class EvidenceRepository {
     }
 
     public Evidence saveOrReuse(Evidence evidence) {
+        return saveOrReuse(evidence, null);
+    }
+
+    public Evidence saveOrReuseDelegated(Evidence evidence, UUID delegationId) {
+        if (delegationId == null || !delegationId.equals(evidence.producerTaskId())) {
+            throw new IllegalArgumentException("Delegated Evidence must reference its delegation task");
+        }
+        Evidence saved = saveOrReuse(evidence, delegationId);
+        jdbcTemplate.update("INSERT INTO agent_delegation_evidence_link(delegation_id,evidence_id) VALUES (?,?) " +
+                "ON CONFLICT (delegation_id,evidence_id) DO NOTHING", delegationId, saved.evidenceId());
+        return saved;
+    }
+
+    private Evidence saveOrReuse(Evidence evidence, UUID delegationId) {
         Optional<Evidence> existing = evidence.runId() == null
                 ? query(BASE_SELECT + " WHERE incident_id=? AND run_id IS NULL AND evidence_status='ACTIVE' " +
                                 "AND evidence_type=? AND source=? AND content_hash=?",
@@ -41,13 +55,14 @@ public class EvidenceRepository {
         jdbcTemplate.update("INSERT INTO evidence_record " +
                         "(id,incident_id,producer_task_id,evidence_type,source,entity,window_start,window_end,summary," +
                         "raw_data_reference,content_hash,collected_at,run_id,agent_id,tool_id,tool_call_id," +
-                        "capability_version,evidence_status,structured_data_json) " +
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb)",
-                evidence.evidenceId(), evidence.incidentId(), evidence.producerTaskId(), evidence.type().name(),
+                        "capability_version,evidence_status,structured_data_json,delegation_id) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)",
+                evidence.evidenceId(), evidence.incidentId(), delegationId == null ? evidence.producerTaskId() : null,
+                evidence.type().name(),
                 evidence.source(), evidence.entity(), timestamp(evidence.windowStart()), timestamp(evidence.windowEnd()),
                 evidence.summary(), evidence.rawDataReference(), evidence.contentHash(), timestamp(evidence.collectedAt()),
                 evidence.runId(), evidence.agentId(), evidence.toolId(), evidence.toolCallId(), evidence.capabilityVersion(),
-                evidence.status().name(), json(evidence.structuredData()));
+                evidence.status().name(), json(evidence.structuredData()), delegationId);
         return evidence;
     }
 
@@ -60,8 +75,10 @@ public class EvidenceRepository {
     }
 
     public List<Evidence> findActiveByRunAndTask(UUID runId, UUID taskId) {
-        return query(BASE_SELECT + " WHERE run_id=? AND producer_task_id=? AND evidence_status='ACTIVE' " +
-                "ORDER BY collected_at", runId, taskId);
+        return query(BASE_SELECT + " WHERE run_id=? AND (producer_task_id=? OR delegation_id=? OR EXISTS " +
+                "(SELECT 1 FROM agent_delegation_evidence_link link " +
+                "WHERE link.evidence_id=evidence_record.id AND link.delegation_id=?)) " +
+                "AND evidence_status='ACTIVE' ORDER BY collected_at", runId, taskId, taskId, taskId);
     }
 
     public void markRunStale(UUID runId) {
@@ -74,7 +91,8 @@ public class EvidenceRepository {
                 "ON CONFLICT (task_id,evidence_id,usage) DO NOTHING", taskId, evidenceId, usage);
     }
 
-    private static final String BASE_SELECT = "SELECT id,incident_id,producer_task_id,run_id,agent_id,tool_id," +
+    private static final String BASE_SELECT = "SELECT id,incident_id,COALESCE(producer_task_id,delegation_id) " +
+            "AS producer_task_id,run_id,agent_id,tool_id," +
             "tool_call_id,capability_version,evidence_status,evidence_type,source,entity,window_start,window_end," +
             "summary,raw_data_reference,content_hash,structured_data_json,collected_at FROM evidence_record";
 

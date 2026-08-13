@@ -45,6 +45,20 @@ public class EvidenceService {
         return repository.saveOrReuse(evidence);
     }
 
+    public Evidence recordDelegated(UUID runId, UUID incidentId, UUID delegationId, String agentId,
+                                    String capabilityVersion, String toolId, String toolCallId, ToolResult result,
+                                    Instant windowStart, Instant windowEnd) {
+        EvidenceType type = result.evidenceType();
+        if (type == null) {
+            return null;
+        }
+        String content = result.summary() + "|" + serialize(result.data());
+        Evidence evidence = new Evidence(UUID.randomUUID(), incidentId, delegationId, runId, agentId, toolId,
+                toolCallId, capabilityVersion, EvidenceStatus.ACTIVE, type, result.source(), result.source(),
+                windowStart, windowEnd, result.summary(), null, sha256(content), result.data(), Instant.now());
+        return repository.saveOrReuseDelegated(evidence, delegationId);
+    }
+
     public List<Evidence> findByIncident(UUID incidentId) {
         return repository.findByIncident(incidentId);
     }

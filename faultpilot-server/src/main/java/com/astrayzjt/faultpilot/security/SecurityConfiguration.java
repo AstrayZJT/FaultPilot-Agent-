@@ -58,13 +58,29 @@ public class SecurityConfiguration {
         http.securityMatcher("/api/integrations/alertmanager/webhook")
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
-                .addFilterBefore(new BearerTokenFilter(token), org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new BearerTokenFilter(token, "/api/integrations/alertmanager/webhook",
+                                "alertmanager", "ROLE_OPERATOR"),
+                        org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("OPERATOR"));
         return http.build();
     }
 
     @Bean
     @Order(2)
+    SecurityFilterChain internalAgentChain(HttpSecurity http,
+                                           @Value("${faultpilot.security.agent-token:}") String token) throws Exception {
+        http.securityMatcher("/api/internal/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(
+                        org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
+                .addFilterBefore(new BearerTokenFilter(token, "/api/internal/", "specialist-agent", "ROLE_AGENT"),
+                        org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
+                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("AGENT"));
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     SecurityFilterChain applicationChain(HttpSecurity http) throws Exception {
         CookieCsrfTokenRepository csrfRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
         CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
@@ -102,18 +118,24 @@ public class SecurityConfiguration {
 
     static final class BearerTokenFilter extends OncePerRequestFilter {
         private final String expected;
+        private final String path;
+        private final String principal;
+        private final String authority;
 
-        BearerTokenFilter(String expected) {
+        BearerTokenFilter(String expected, String path, String principal, String authority) {
             this.expected = expected == null ? "" : expected;
+            this.path = path;
+            this.principal = principal;
+            this.authority = authority;
         }
 
         @Override
         protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
                 throws ServletException, IOException {
             String header = request.getHeader("Authorization");
-            if (!expected.isBlank() && header != null && header.equals("Bearer " + expected)) {
-                var authentication = new UsernamePasswordAuthenticationToken("alertmanager", null,
-                        List.of(new SimpleGrantedAuthority("ROLE_OPERATOR")));
+            if (!expected.isBlank() && matches(header)) {
+                var authentication = new UsernamePasswordAuthenticationToken(principal, null,
+                        List.of(new SimpleGrantedAuthority(authority)));
                 org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(authentication);
             }
             chain.doFilter(request, response);
@@ -121,7 +143,16 @@ public class SecurityConfiguration {
 
         @Override
         protected boolean shouldNotFilter(HttpServletRequest request) {
-            return !"/api/integrations/alertmanager/webhook".equals(request.getServletPath());
+            return path.endsWith("/") ? !request.getServletPath().startsWith(path)
+                    : !path.equals(request.getServletPath());
+        }
+
+        private boolean matches(String header) {
+            if (header == null) {
+                return false;
+            }
+            return java.security.MessageDigest.isEqual(("Bearer " + expected).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    header.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
     }
 }
