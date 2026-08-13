@@ -86,6 +86,17 @@ public class AgentDelegationRepository {
                 expected.name(), version) == 1;
     }
 
+    public boolean updateRemoteTaskId(UUID delegationId, DelegationStatus expected, long version,
+                                      String remoteTaskId) {
+        if (remoteTaskId == null || remoteTaskId.isBlank() || remoteTaskId.length() > 256
+                || expected == null || expected.terminal()) {
+            throw new IllegalArgumentException("Active delegation and remoteTaskId are required");
+        }
+        return jdbcTemplate.update("UPDATE agent_delegation SET remote_task_id=?,version=version+1 " +
+                        "WHERE id=? AND status=? AND version=?", remoteTaskId, delegationId,
+                expected.name(), version) == 1;
+    }
+
     private List<AgentDelegation> query(String sql, Object... arguments) {
         return jdbcTemplate.query(sql, (rs, row) -> {
             try {

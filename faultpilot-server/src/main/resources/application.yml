@@ -69,6 +69,10 @@ faultpilot:
   agents:
     transport: ${FAULTPILOT_SPECIALIST_TRANSPORT:LOCAL}
     timeout-seconds: ${FAULTPILOT_AGENT_DISCOVERY_TIMEOUT_SECONDS:5}
+    request-timeout-seconds: ${FAULTPILOT_A2A_REQUEST_TIMEOUT_SECONDS:5}
+    task-timeout-seconds: ${FAULTPILOT_A2A_TASK_TIMEOUT_SECONDS:60}
+    poll-interval-millis: ${FAULTPILOT_A2A_POLL_INTERVAL_MILLIS:250}
+    max-retries: ${FAULTPILOT_A2A_MAX_RETRIES:2}
     protocol-version: "1.0"
     local-versions:
       JVM_AGENT: ${JVM_AGENT_CAPABILITY_VERSION:local-1.0.0}
@@ -79,18 +83,22 @@ faultpilot:
       jvm-agent:
         agent-type: JVM_AGENT
         card-url: ${JVM_AGENT_CARD_URL:http://localhost:8091/.well-known/agent-card.json}
+        bearer-token: ${JVM_AGENT_A2A_TOKEN:}
         required: true
       database-agent:
         agent-type: DATABASE_AGENT
         card-url: ${DATABASE_AGENT_CARD_URL:http://localhost:8092/.well-known/agent-card.json}
+        bearer-token: ${DATABASE_AGENT_A2A_TOKEN:}
         required: false
       cache-agent:
         agent-type: CACHE_AGENT
         card-url: ${CACHE_AGENT_CARD_URL:http://localhost:8093/.well-known/agent-card.json}
+        bearer-token: ${CACHE_AGENT_A2A_TOKEN:}
         required: false
       dependency-agent:
         agent-type: DEPENDENCY_AGENT
         card-url: ${DEPENDENCY_AGENT_CARD_URL:http://localhost:8094/.well-known/agent-card.json}
+        bearer-token: ${DEPENDENCY_AGENT_A2A_TOKEN:}
         required: false
   agent:
     specialist-deadline-seconds: ${FAULTPILOT_SPECIALIST_DEADLINE_SECONDS:120}

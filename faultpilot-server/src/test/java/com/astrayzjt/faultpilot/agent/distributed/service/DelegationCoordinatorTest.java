@@ -1,6 +1,7 @@
 package com.astrayzjt.faultpilot.agent.distributed.service;
 
 import com.astrayzjt.faultpilot.agent.distributed.discovery.CapabilityRegistry;
+import com.astrayzjt.faultpilot.agent.distributed.discovery.AgentDiscoveryProperties;
 import com.astrayzjt.faultpilot.agent.distributed.domain.AgentAvailability;
 import com.astrayzjt.faultpilot.agent.distributed.domain.AgentCapability;
 import com.astrayzjt.faultpilot.agent.distributed.domain.AgentDelegation;
@@ -12,6 +13,7 @@ import com.astrayzjt.faultpilot.agent.distributed.domain.InvestigationRun;
 import com.astrayzjt.faultpilot.agent.distributed.domain.InvestigationRunStatus;
 import com.astrayzjt.faultpilot.agent.distributed.persistence.AgentDelegationRepository;
 import com.astrayzjt.faultpilot.agent.distributed.protocol.EvidenceReferenceArtifact;
+import com.astrayzjt.faultpilot.agent.distributed.protocol.A2aTaskSnapshot;
 import com.astrayzjt.faultpilot.agent.distributed.transport.SpecialistTransport;
 import com.astrayzjt.faultpilot.common.domain.AgentType;
 import com.astrayzjt.faultpilot.common.domain.Evidence;
@@ -51,7 +53,7 @@ class DelegationCoordinatorTest {
                 "Inspect JVM CPU evidence", fixture.incident, Instant.now().plusSeconds(30));
 
         assertThat(result).isSameAs(completed);
-        verify(fixture.transport, never()).execute(any(), any(), any(), any());
+        verify(fixture.transport, never()).submit(any(), any(), any(), any());
     }
 
     @Test
@@ -65,8 +67,7 @@ class DelegationCoordinatorTest {
         when(fixture.repository.find(any())).thenAnswer(invocation -> {
             AgentDelegation current = state.get();
             if (current.status() == DelegationStatus.PENDING) {
-                current = running(current);
-                state.set(current);
+                return Optional.of(current);
             }
             return Optional.of(current);
         });
@@ -80,11 +81,13 @@ class DelegationCoordinatorTest {
                 });
         when(fixture.evidenceService.findActiveByRun(fixture.run.runId())).thenReturn(List.of(fixture.evidence));
         UUID foreignId = UUID.randomUUID();
-        when(fixture.transport.execute(any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(fixture.transport.submit(any(), any(), any(), any())).thenAnswer(invocation -> {
             AgentDelegation delegation = invocation.getArgument(0);
-            return new EvidenceReferenceArtifact(EvidenceReferenceArtifact.SCHEMA_VERSION,
+            EvidenceReferenceArtifact artifact = new EvidenceReferenceArtifact(EvidenceReferenceArtifact.SCHEMA_VERSION,
                     delegation.delegationId(), delegation.agentId(), delegation.capabilityVersion(),
                     DelegationStatus.COMPLETED, List.of(foreignId), 1);
+            return new A2aTaskSnapshot(A2aTaskSnapshot.SCHEMA_VERSION, "remote-1", delegation.delegationId(),
+                    DelegationStatus.COMPLETED, artifact, null, null, Instant.now());
         });
 
         AgentDelegation result = fixture.coordinator.execute(fixture.run, 1, AgentType.JVM_AGENT,
@@ -116,7 +119,11 @@ class DelegationCoordinatorTest {
         AgentDelegationRepository repository = mock(AgentDelegationRepository.class);
         SpecialistTransport transport = mock(SpecialistTransport.class);
         EvidenceService evidenceService = mock(EvidenceService.class);
-        DelegationCoordinator coordinator = new DelegationCoordinator(repository, registry, transport, evidenceService);
+        AgentDiscoveryProperties properties = new AgentDiscoveryProperties();
+        properties.setTaskTimeoutSeconds(5);
+        properties.setPollIntervalMillis(25);
+        DelegationCoordinator coordinator = new DelegationCoordinator(repository, registry, transport,
+                evidenceService, properties);
         return new Fixture(coordinator, repository, transport, evidenceService, run, incident, evidence);
     }
 

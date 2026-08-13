@@ -3,6 +3,7 @@ package com.astrayzjt.faultpilot.agent.distributed.transport;
 import com.astrayzjt.faultpilot.agent.distributed.domain.AgentDelegation;
 import com.astrayzjt.faultpilot.agent.distributed.domain.DelegationStatus;
 import com.astrayzjt.faultpilot.agent.distributed.protocol.EvidenceReferenceArtifact;
+import com.astrayzjt.faultpilot.agent.distributed.protocol.A2aTaskSnapshot;
 import com.astrayzjt.faultpilot.agent.protocol.SpecialistAgent;
 import com.astrayzjt.faultpilot.common.domain.AgentFinding;
 import com.astrayzjt.faultpilot.common.domain.AgentTask;
@@ -21,6 +22,7 @@ import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Component
 @ConditionalOnProperty(prefix = "faultpilot.agents", name = "transport", havingValue = "LOCAL", matchIfMissing = true)
@@ -46,14 +48,14 @@ public final class LocalSpecialistTransport implements SpecialistTransport {
     }
 
     @Override
-    public EvidenceReferenceArtifact execute(AgentDelegation delegation, IncidentSnapshot incident,
-                                             List<Evidence> activeEvidence, Instant deadline) {
+    public A2aTaskSnapshot submit(AgentDelegation delegation, IncidentSnapshot incident,
+                                  List<Evidence> activeEvidence, Instant deadline) {
         if (Instant.now().isAfter(deadline)) {
-            return artifact(delegation, DelegationStatus.TIMED_OUT, List.of(), 0);
+            return snapshot(delegation, artifact(delegation, DelegationStatus.TIMED_OUT, List.of(), 0));
         }
         SpecialistAgent agent = agents.get(delegation.agentType());
         if (agent == null) {
-            return artifact(delegation, DelegationStatus.FAILED, List.of(), 0);
+            return snapshot(delegation, artifact(delegation, DelegationStatus.FAILED, List.of(), 0));
         }
         AgentTask task = task(delegation);
         taskRepository.insert(task);
@@ -65,7 +67,16 @@ public final class LocalSpecialistTransport implements SpecialistTransport {
         evidenceIds.addAll(evidenceService.findActiveByRunAndTask(delegation.runId(), delegation.delegationId())
                 .stream().map(Evidence::evidenceId).toList());
         DelegationStatus status = status(finding.status(), evidenceIds.isEmpty());
-        return artifact(delegation, status, List.copyOf(evidenceIds), finding.stepsUsed());
+        return snapshot(delegation, artifact(delegation, status, List.copyOf(evidenceIds), finding.stepsUsed()));
+    }
+
+    @Override
+    public Optional<A2aTaskSnapshot> query(AgentDelegation delegation, Instant deadline) {
+        return Optional.empty();
+    }
+
+    @Override
+    public void cancel(AgentDelegation delegation, Instant deadline) {
     }
 
     private AgentFinding investigate(SpecialistAgent agent, AgentTask task, IncidentSnapshot incident,
@@ -112,6 +123,11 @@ public final class LocalSpecialistTransport implements SpecialistTransport {
         return new EvidenceReferenceArtifact(EvidenceReferenceArtifact.SCHEMA_VERSION,
                 delegation.delegationId(), delegation.agentId(), delegation.capabilityVersion(), status,
                 evidenceIds, Math.max(0, Math.min(10, stepsUsed)));
+    }
+
+    private A2aTaskSnapshot snapshot(AgentDelegation delegation, EvidenceReferenceArtifact artifact) {
+        return new A2aTaskSnapshot(A2aTaskSnapshot.SCHEMA_VERSION, delegation.delegationId().toString(),
+                delegation.delegationId(), artifact.executionStatus(), artifact, null, null, Instant.now());
     }
 
     private String safeMessage(Throwable throwable) {

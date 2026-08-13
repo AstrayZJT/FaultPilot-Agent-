@@ -49,11 +49,11 @@ class LocalSpecialistTransportTest {
         when(evidenceService.findActiveByRunAndTask(runId, delegation.delegationId())).thenReturn(List.of(produced));
         LocalSpecialistTransport transport = new LocalSpecialistTransport(List.of(agent), tasks, evidenceService);
 
-        var artifact = transport.execute(delegation, incident(incidentId), List.of(), Instant.now().plusSeconds(30));
+        var snapshot = transport.submit(delegation, incident(incidentId), List.of(), Instant.now().plusSeconds(30));
 
-        assertThat(artifact.executionStatus()).isEqualTo(DelegationStatus.COMPLETED);
-        assertThat(artifact.evidenceIds()).containsExactly(evidenceId);
-        assertThat(artifact.stepsUsed()).isEqualTo(2);
+        assertThat(snapshot.status()).isEqualTo(DelegationStatus.COMPLETED);
+        assertThat(snapshot.artifact().evidenceIds()).containsExactly(evidenceId);
+        assertThat(snapshot.artifact().stepsUsed()).isEqualTo(2);
         verify(tasks).insert(any(AgentTask.class));
         verify(tasks).markRunning(any(AgentTask.class));
     }
@@ -76,10 +76,10 @@ class LocalSpecialistTransportTest {
                 .thenReturn(List.of(evidence(runId, incidentId, delegation.delegationId(), evidenceId)));
         LocalSpecialistTransport transport = new LocalSpecialistTransport(List.of(agent), tasks, evidenceService);
 
-        var artifact = transport.execute(delegation, incident(incidentId), List.of(), Instant.now().plusSeconds(30));
+        var snapshot = transport.submit(delegation, incident(incidentId), List.of(), Instant.now().plusSeconds(30));
 
-        assertThat(artifact.executionStatus()).isEqualTo(DelegationStatus.COMPLETED);
-        assertThat(artifact.evidenceIds()).containsExactly(evidenceId);
+        assertThat(snapshot.status()).isEqualTo(DelegationStatus.COMPLETED);
+        assertThat(snapshot.artifact().evidenceIds()).containsExactly(evidenceId);
         org.mockito.Mockito.verify(agent, org.mockito.Mockito.never()).investigate(any(), any(), any());
     }
 

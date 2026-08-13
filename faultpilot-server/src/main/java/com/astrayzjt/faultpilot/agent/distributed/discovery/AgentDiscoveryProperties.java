@@ -12,6 +12,10 @@ public class AgentDiscoveryProperties {
 
     private Transport transport = Transport.LOCAL;
     private int timeoutSeconds = 5;
+    private int requestTimeoutSeconds = 5;
+    private int taskTimeoutSeconds = 60;
+    private int pollIntervalMillis = 250;
+    private int maxRetries = 2;
     private String protocolVersion = "1.0";
     private Map<AgentType, String> localVersions = defaultVersions();
     private Map<String, RemoteAgentProperties> endpoints = new LinkedHashMap<>();
@@ -37,6 +41,50 @@ public class AgentDiscoveryProperties {
 
     public String getProtocolVersion() {
         return protocolVersion;
+    }
+
+    public int getRequestTimeoutSeconds() {
+        return requestTimeoutSeconds;
+    }
+
+    public void setRequestTimeoutSeconds(int requestTimeoutSeconds) {
+        if (requestTimeoutSeconds < 1 || requestTimeoutSeconds > 30) {
+            throw new IllegalArgumentException("A2A request timeout must be between 1 and 30 seconds");
+        }
+        this.requestTimeoutSeconds = requestTimeoutSeconds;
+    }
+
+    public int getTaskTimeoutSeconds() {
+        return taskTimeoutSeconds;
+    }
+
+    public void setTaskTimeoutSeconds(int taskTimeoutSeconds) {
+        if (taskTimeoutSeconds < 5 || taskTimeoutSeconds > 300) {
+            throw new IllegalArgumentException("A2A task timeout must be between 5 and 300 seconds");
+        }
+        this.taskTimeoutSeconds = taskTimeoutSeconds;
+    }
+
+    public int getPollIntervalMillis() {
+        return pollIntervalMillis;
+    }
+
+    public void setPollIntervalMillis(int pollIntervalMillis) {
+        if (pollIntervalMillis < 25 || pollIntervalMillis > 5_000) {
+            throw new IllegalArgumentException("A2A poll interval must be between 25 and 5000 milliseconds");
+        }
+        this.pollIntervalMillis = pollIntervalMillis;
+    }
+
+    public int getMaxRetries() {
+        return maxRetries;
+    }
+
+    public void setMaxRetries(int maxRetries) {
+        if (maxRetries < 0 || maxRetries > 2) {
+            throw new IllegalArgumentException("A2A maxRetries must be between 0 and 2");
+        }
+        this.maxRetries = maxRetries;
     }
 
     public void setProtocolVersion(String protocolVersion) {
@@ -71,6 +119,7 @@ public class AgentDiscoveryProperties {
     public static class RemoteAgentProperties {
         private AgentType agentType;
         private String cardUrl;
+        private String bearerToken;
         private boolean required;
 
         public AgentType getAgentType() {
@@ -91,6 +140,14 @@ public class AgentDiscoveryProperties {
 
         public boolean isRequired() {
             return required;
+        }
+
+        public String getBearerToken() {
+            return bearerToken;
+        }
+
+        public void setBearerToken(String bearerToken) {
+            this.bearerToken = bearerToken;
         }
 
         public void setRequired(boolean required) {
