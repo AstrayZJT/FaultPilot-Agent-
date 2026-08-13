@@ -36,6 +36,7 @@ import org.bsc.langgraph4j.checkpoint.PostgresSaver;
 import org.bsc.langgraph4j.serializer.std.ObjectStreamStateSerializer;
 import org.bsc.langgraph4j.state.Channels;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -57,7 +58,8 @@ import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
 @Service
-public class IncidentOrchestrator {
+@ConditionalOnProperty(prefix = "faultpilot.orchestration", name = "mode", havingValue = "LEGACY")
+public class IncidentOrchestrator implements IncidentWorkflow {
 
     private static final int MAX_ROUNDS = 2;
     private static final int DEFAULT_AGENT_MAX_STEPS = 4;
@@ -123,6 +125,7 @@ public class IncidentOrchestrator {
         this.graph = buildGraph(dataSource);
     }
 
+    @Override
     public void start(UUID incidentId) {
         try {
             orchestratorExecutor.execute(() -> runGraph(incidentId));

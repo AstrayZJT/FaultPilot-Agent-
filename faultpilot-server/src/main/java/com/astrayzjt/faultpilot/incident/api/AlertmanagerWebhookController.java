@@ -3,7 +3,7 @@ package com.astrayzjt.faultpilot.incident.api;
 import com.astrayzjt.faultpilot.common.domain.Incident;
 import com.astrayzjt.faultpilot.incident.application.IncidentService;
 import com.astrayzjt.faultpilot.incident.persistence.IncidentRepository;
-import com.astrayzjt.faultpilot.orchestration.IncidentOrchestrator;
+import com.astrayzjt.faultpilot.orchestration.IncidentWorkflow;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,10 +20,10 @@ public class AlertmanagerWebhookController {
 
     private final IncidentService incidentService;
     private final IncidentRepository incidentRepository;
-    private final IncidentOrchestrator orchestrator;
+    private final IncidentWorkflow orchestrator;
 
     public AlertmanagerWebhookController(IncidentService incidentService, IncidentRepository incidentRepository,
-                                         IncidentOrchestrator orchestrator) {
+                                         IncidentWorkflow orchestrator) {
         this.incidentService = incidentService;
         this.incidentRepository = incidentRepository;
         this.orchestrator = orchestrator;

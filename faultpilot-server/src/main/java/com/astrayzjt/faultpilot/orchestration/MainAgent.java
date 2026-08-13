@@ -34,10 +34,11 @@ public final class MainAgent {
         String system = "You are FaultPilot Main Agent. Reflect on the Incident, current active Evidence, prior " +
                 "delegations and available specialist Agent capability summaries. Choose exactly one action: " +
                 "DELEGATE, COMPLETE, or INCONCLUSIVE. Treat the user symptom as a weak prior and prefer structured " +
-                "Evidence. DELEGATE may select only one supplied agentType and must provide a diagnostic objective, " +
+                "Evidence. DELEGATE may select one to three supplied specialist Agents for independent parallel " +
+                "investigations. Each delegation must provide a diagnostic objective, " +
                 "not a URL, credential, SQL statement, tool name, or shell/Arthas/Redis command. COMPLETE requires " +
                 "a supported DiagnosisDraft citing only supplied Evidence IDs. Do not invent facts or IDs. Return " +
-                "JSON only: {action,agentType,objective,evidenceIds,diagnosis,reason}. diagnosis fields are " +
+                "JSON only: {action,delegations:[{agentType,objective}],evidenceIds,diagnosis,reason}. diagnosis fields are " +
                 "{status,primaryCause,contributingFactors,supportingEvidenceIds,counterEvidenceIds," +
                 "missingEvidenceTypes,summary}.";
         String user = "runId=" + context.run().runId() +
@@ -72,13 +73,32 @@ public final class MainAgent {
         try {
             JsonNode root = objectMapper.readTree(extractJson(raw));
             MainAgentAction action = MainAgentAction.valueOf(requiredText(root, "action").toUpperCase(Locale.ROOT));
-            AgentType agentType = optionalEnum(root.path("agentType"), AgentType.class);
+            List<SpecialistDelegation> delegations = parseDelegations(root);
             DiagnosisDraft draft = root.hasNonNull("diagnosis") ? parseDraft(root.path("diagnosis")) : null;
-            return new MainAgentDecision(action, agentType, root.path("objective").asText(""),
-                    uuidList(root.path("evidenceIds")), draft, root.path("reason").asText(""));
+            return new MainAgentDecision(action, delegations, uuidList(root.path("evidenceIds")), draft,
+                    root.path("reason").asText(""));
         } catch (JsonProcessingException | RuntimeException exception) {
             throw new IllegalArgumentException("Main Agent output is not a valid decision", exception);
         }
+    }
+
+    private List<SpecialistDelegation> parseDelegations(JsonNode root) {
+        JsonNode nodes = root.path("delegations");
+        if (nodes.isMissingNode() || nodes.isNull()) {
+            if (root.hasNonNull("agentType") && root.hasNonNull("objective")) {
+                return List.of(new SpecialistDelegation(
+                        optionalEnum(root.path("agentType"), AgentType.class),
+                        root.path("objective").asText("")));
+            }
+            return List.of();
+        }
+        if (!nodes.isArray()) {
+            throw new IllegalArgumentException("delegations must be an array");
+        }
+        List<SpecialistDelegation> result = new ArrayList<>();
+        nodes.forEach(node -> result.add(new SpecialistDelegation(
+                optionalEnum(node.path("agentType"), AgentType.class), node.path("objective").asText(""))));
+        return List.copyOf(result);
     }
 
     private DiagnosisDraft parseDraft(JsonNode node) {

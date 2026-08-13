@@ -1,14 +1,11 @@
 package com.astrayzjt.faultpilot.orchestration;
 
-import com.astrayzjt.faultpilot.common.domain.AgentType;
-
 import java.util.List;
 import java.util.UUID;
 
 public record MainAgentDecision(
         MainAgentAction action,
-        AgentType agentType,
-        String objective,
+        List<SpecialistDelegation> delegations,
         List<UUID> evidenceIds,
         DiagnosisDraft draft,
         String reason) {
@@ -17,15 +14,18 @@ public record MainAgentDecision(
         if (action == null) {
             throw new IllegalArgumentException("Main Agent action is required");
         }
-        objective = objective == null ? "" : objective.trim();
+        delegations = delegations == null ? List.of() : List.copyOf(delegations);
         evidenceIds = evidenceIds == null ? List.of() : evidenceIds.stream().distinct().toList();
         reason = reason == null ? "" : reason.trim();
-        if (action == MainAgentAction.DELEGATE && (agentType == null || objective.isBlank())) {
-            throw new IllegalArgumentException("DELEGATE requires an Agent and objective");
+        if (action == MainAgentAction.DELEGATE && delegations.isEmpty()) {
+            throw new IllegalArgumentException("DELEGATE requires at least one specialist delegation");
+        }
+        if (action != MainAgentAction.DELEGATE && !delegations.isEmpty()) {
+            throw new IllegalArgumentException(action + " must not include specialist delegations");
         }
     }
 
     public static MainAgentDecision inconclusive(String reason) {
-        return new MainAgentDecision(MainAgentAction.INCONCLUSIVE, null, "", List.of(), null, reason);
+        return new MainAgentDecision(MainAgentAction.INCONCLUSIVE, List.of(), List.of(), null, reason);
     }
 }

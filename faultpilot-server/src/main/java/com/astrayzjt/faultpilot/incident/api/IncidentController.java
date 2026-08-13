@@ -2,7 +2,7 @@ package com.astrayzjt.faultpilot.incident.api;
 
 import com.astrayzjt.faultpilot.common.domain.Incident;
 import com.astrayzjt.faultpilot.incident.application.IncidentService;
-import com.astrayzjt.faultpilot.orchestration.IncidentOrchestrator;
+import com.astrayzjt.faultpilot.orchestration.IncidentWorkflow;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +21,9 @@ import java.util.UUID;
 public class IncidentController {
 
     private final IncidentService incidentService;
-    private final IncidentOrchestrator orchestrator;
+    private final IncidentWorkflow orchestrator;
 
-    public IncidentController(IncidentService incidentService, IncidentOrchestrator orchestrator) {
+    public IncidentController(IncidentService incidentService, IncidentWorkflow orchestrator) {
         this.incidentService = incidentService;
         this.orchestrator = orchestrator;
     }

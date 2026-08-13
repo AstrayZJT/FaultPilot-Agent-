@@ -29,6 +29,11 @@ springdoc:
     path: /swagger-ui.html
 
 faultpilot:
+  orchestration:
+    mode: ${FAULTPILOT_ORCHESTRATION_MODE:LOOP}
+    max-rounds: ${FAULTPILOT_MAIN_AGENT_MAX_ROUNDS:4}
+    max-delegations: ${FAULTPILOT_MAIN_AGENT_MAX_DELEGATIONS:8}
+    run-timeout-seconds: ${FAULTPILOT_RUN_TIMEOUT_SECONDS:180}
   declarative:
     enabled: ${FAULTPILOT_DECLARATIVE_TOOLS_ENABLED:true}
     tool-locations:

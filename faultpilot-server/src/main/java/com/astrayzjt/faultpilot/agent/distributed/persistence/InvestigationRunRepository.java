@@ -38,6 +38,11 @@ public class InvestigationRunRepository {
                 "AND status IN ('PENDING','RUNNING') ORDER BY started_at DESC LIMIT 1", incidentId).stream().findFirst();
     }
 
+    public Optional<InvestigationRun> findLatestByIncident(UUID incidentId) {
+        return query("SELECT * FROM incident_investigation_run WHERE incident_id=? " +
+                "ORDER BY started_at DESC LIMIT 1", incidentId).stream().findFirst();
+    }
+
     public List<InvestigationRun> findRecoverable() {
         return query("SELECT * FROM incident_investigation_run WHERE status IN ('PENDING','RUNNING') " +
                 "ORDER BY started_at");

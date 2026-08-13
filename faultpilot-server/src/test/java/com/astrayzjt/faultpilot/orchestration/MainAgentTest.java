@@ -25,8 +25,10 @@ class MainAgentTest {
         MainAgentDecision decision = agent.parse("""
                 {
                   "action": "DELEGATE",
-                  "agentType": "JVM_AGENT",
-                  "objective": "Determine whether executor workers are blocked",
+                  "delegations": [{
+                    "agentType": "JVM_AGENT",
+                    "objective": "Determine whether executor workers are blocked"
+                  }],
                   "evidenceIds": ["%s"],
                   "diagnosis": null,
                   "reason": "Thread-pool evidence needs JVM corroboration"
@@ -34,10 +36,30 @@ class MainAgentTest {
                 """.formatted(evidenceId));
 
         assertThat(decision.action()).isEqualTo(MainAgentAction.DELEGATE);
-        assertThat(decision.agentType()).isEqualTo(AgentType.JVM_AGENT);
-        assertThat(decision.objective()).isEqualTo("Determine whether executor workers are blocked");
+        assertThat(decision.delegations()).singleElement().satisfies(delegation -> {
+            assertThat(delegation.agentType()).isEqualTo(AgentType.JVM_AGENT);
+            assertThat(delegation.objective()).isEqualTo("Determine whether executor workers are blocked");
+        });
         assertThat(decision.evidenceIds()).containsExactly(evidenceId);
         assertThat(decision.draft()).isNull();
+    }
+
+    @Test
+    void parsesIndependentParallelDelegations() {
+        MainAgentDecision decision = agent.parse("""
+                {
+                  "action": "DELEGATE",
+                  "delegations": [
+                    {"agentType":"JVM_AGENT","objective":"Inspect executor saturation"},
+                    {"agentType":"DATABASE_AGENT","objective":"Inspect connection-pool pressure"}
+                  ],
+                  "evidenceIds": [],
+                  "reason": "Two independent anomaly domains need investigation"
+                }
+                """);
+
+        assertThat(decision.delegations()).extracting(SpecialistDelegation::agentType)
+                .containsExactly(AgentType.JVM_AGENT, AgentType.DATABASE_AGENT);
     }
 
     @Test
@@ -48,8 +70,7 @@ class MainAgentTest {
         MainAgentDecision decision = agent.parse("""
                 {
                   "action": "COMPLETE",
-                  "agentType": null,
-                  "objective": "",
+                  "delegations": [],
                   "evidenceIds": ["%s", "%s"],
                   "diagnosis": {
                     "status": "CONFIRMED",

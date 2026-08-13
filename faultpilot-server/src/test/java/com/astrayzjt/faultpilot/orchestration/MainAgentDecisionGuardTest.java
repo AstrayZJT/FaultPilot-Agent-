@@ -37,8 +37,10 @@ class MainAgentDecisionGuardTest {
     @Test
     void acceptsAvailableAgentAndCurrentEvidence() {
         Fixture fixture = fixture(List.of());
-        MainAgentDecision decision = new MainAgentDecision(MainAgentAction.DELEGATE, AgentType.JVM_AGENT,
-                "Inspect JVM worker blocking behind executor saturation", List.of(fixture.evidence.evidenceId()),
+        MainAgentDecision decision = new MainAgentDecision(MainAgentAction.DELEGATE,
+                List.of(new SpecialistDelegation(AgentType.JVM_AGENT,
+                        "Inspect JVM worker blocking behind executor saturation")),
+                List.of(fixture.evidence.evidenceId()),
                 null, "Need source-level corroboration");
 
         assertThat(guard.validate(decision, fixture.context)).isSameAs(decision);
@@ -48,15 +50,18 @@ class MainAgentDecisionGuardTest {
     void rejectsUnavailableAgentDangerousObjectiveAndForeignEvidence() {
         Fixture fixture = fixture(List.of());
         assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
-                AgentType.DATABASE_AGENT, "Inspect database", List.of(), null, "route"), fixture.context))
+                List.of(new SpecialistDelegation(AgentType.DATABASE_AGENT, "Inspect database")),
+                List.of(), null, "route"), fixture.context))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not available");
         assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
-                AgentType.JVM_AGENT, "curl http://internal/admin", List.of(), null, "route"), fixture.context))
+                List.of(new SpecialistDelegation(AgentType.JVM_AGENT, "curl http://internal/admin")),
+                List.of(), null, "route"), fixture.context))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("forbidden");
         assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
-                AgentType.JVM_AGENT, "Inspect JVM workers", List.of(UUID.randomUUID()), null, "route"), fixture.context))
+                List.of(new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers")),
+                List.of(UUID.randomUUID()), null, "route"), fixture.context))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("outside");
     }
@@ -69,26 +74,59 @@ class MainAgentDecisionGuardTest {
         Fixture fixture = fixture(List.of(previous));
 
         assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
-                AgentType.JVM_AGENT, objective, List.of(), null, "repeat"), fixture.context))
+                List.of(new SpecialistDelegation(AgentType.JVM_AGENT, objective)),
+                List.of(), null, "repeat"), fixture.context))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("repeated");
     }
 
     @Test
+    void rejectsMoreThanThreeParallelDelegationsAndDuplicatesWithinOneRound() {
+        Fixture fixture = fixture(List.of());
+        SpecialistDelegation delegation = new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers");
+        assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
+                List.of(delegation, delegation), List.of(), null, "parallel"), fixture.context))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same round");
+
+        assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
+                List.of(
+                        new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers one"),
+                        new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers two"),
+                        new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers three"),
+                        new SpecialistDelegation(AgentType.JVM_AGENT, "Inspect JVM workers four")),
+                List.of(), null, "parallel"), fixture.context))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at most 3");
+    }
+
+    @Test
     void downgradesUnsupportedCompletionButAcceptsEvidenceBoundDraft() {
         Fixture fixture = fixture(List.of());
-        MainAgentDecision unsupported = new MainAgentDecision(MainAgentAction.COMPLETE, null, "", List.of(),
+        MainAgentDecision unsupported = new MainAgentDecision(MainAgentAction.COMPLETE, List.of(), List.of(),
                 new DiagnosisDraft(DiagnosisStatus.CONFIRMED, CauseCode.JVM_CPU_HOTSPOT, List.of(),
                         List.of(), List.of(), List.of(), "CPU is high"), "done");
 
         assertThat(guard.validate(unsupported, fixture.context).action()).isEqualTo(MainAgentAction.INCONCLUSIVE);
 
-        MainAgentDecision supported = new MainAgentDecision(MainAgentAction.COMPLETE, null, "",
+        MainAgentDecision supported = new MainAgentDecision(MainAgentAction.COMPLETE, List.of(),
                 List.of(fixture.evidence.evidenceId()),
                 new DiagnosisDraft(DiagnosisStatus.CONFIRMED, CauseCode.JVM_CPU_HOTSPOT, List.of(),
                         List.of(fixture.evidence.evidenceId()), List.of(), List.of(), "CPU hotspot is confirmed"),
                 "done");
-        assertThat(guard.validate(supported, fixture.context)).isSameAs(supported);
+        MainAgentDecision normalized = guard.validate(supported, fixture.context);
+        assertThat(normalized.action()).isEqualTo(MainAgentAction.COMPLETE);
+        assertThat(normalized.draft().status()).isEqualTo(DiagnosisStatus.SUPPORTED);
+        assertThat(normalized.draft().missingEvidenceTypes()).contains(EvidenceType.CPU_HOT_METHOD_FOUND,
+                EvidenceType.REPEATED_RUNNABLE_STACK);
+
+        MainAgentDecision modelSupported = new MainAgentDecision(MainAgentAction.COMPLETE, List.of(),
+                List.of(fixture.evidence.evidenceId()),
+                new DiagnosisDraft(DiagnosisStatus.SUPPORTED, CauseCode.JVM_CPU_HOTSPOT, List.of(),
+                        List.of(fixture.evidence.evidenceId()), List.of(), List.of(), "CPU hotspot is supported"),
+                "done");
+        assertThat(guard.validate(modelSupported, fixture.context).draft().missingEvidenceTypes())
+                .contains(EvidenceType.CPU_HOT_METHOD_FOUND, EvidenceType.REPEATED_RUNNABLE_STACK);
     }
 
     private Fixture fixture(List<AgentDelegation> delegations) {

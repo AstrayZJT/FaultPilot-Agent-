@@ -44,11 +44,15 @@
     eventSource.onopen = () => setConnection(true);
     eventSource.onerror = () => setConnection(false);
     eventSource.onmessage = event => appendEvent(event.lastEventId, 'message', event.data);
-    ['INVESTIGATION_STARTED','BASELINE_COLLECTED','ROUTING_SIGNALS_COMPUTED','INVESTIGATION_PLANNED','AGENTS_COMPLETED','DIAGNOSIS_PROPOSED','DIAGNOSIS_CRITIQUED','DIAGNOSIS_REVISED','EVIDENCE_GATE_DECIDED','DIAGNOSIS_COMPLETED','DIAGNOSIS_INCONCLUSIVE','MODEL_CALL_FAILED','MODEL_OUTPUT_INVALID','ORCHESTRATION_FAILED','ACTION_PENDING','ACTION_SKIPPED','ACTION_CONFIRMED','ACTION_REJECTED','VERIFICATION_COMPLETED'].forEach(name => eventSource.addEventListener(name, event => { appendEvent(event.lastEventId, name, event.data); render(); }));
+    ['INVESTIGATION_STARTED','CAPABILITY_SNAPSHOT_BOUND','BASELINE_COLLECTED','MAIN_AGENT_DECIDED','DELEGATION_SUBMITTED','DELEGATION_COMPLETED','SUMMARY_COMPLETED','ROUTING_SIGNALS_COMPUTED','INVESTIGATION_PLANNED','AGENTS_COMPLETED','DIAGNOSIS_PROPOSED','DIAGNOSIS_CRITIQUED','DIAGNOSIS_REVISED','EVIDENCE_GATE_DECIDED','DIAGNOSIS_COMPLETED','DIAGNOSIS_INCONCLUSIVE','MODEL_CALL_FAILED','MODEL_OUTPUT_INVALID','ORCHESTRATOR_REJECTED','ORCHESTRATION_FAILED','ACTION_PENDING','ACTION_SKIPPED','ACTION_CONFIRMED','ACTION_REJECTED','VERIFICATION_COMPLETED'].forEach(name => eventSource.addEventListener(name, event => { appendEvent(event.lastEventId, name, event.data); render(); }));
   };
   const appendEvent = (id, type, data) => { const item = document.createElement('li'); item.innerHTML = `<time>#${id}</time><code>${type}</code><span>${escapeHtml(data)}</span>`; $('events').prepend(item); };
   const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
   const renderInvestigation = detail => {
+    if (detail.orchestrationMode === 'LOOP') {
+      renderLoopInvestigation(detail);
+      return;
+    }
     const gate = detail.latestEvidenceGate;
     const proposal = detail.proposals.length ? detail.proposals[detail.proposals.length - 1] : null;
     const critique = detail.critiques.length ? detail.critiques[detail.critiques.length - 1].critique : null;
@@ -66,6 +70,27 @@
     const proposalHtml = proposal ? '<div class="investigation-note"><b>Proposal</b> · ' + escapeHtml(proposal.status) + ' · ' + escapeHtml(proposal.primaryCause) + '<br>' + escapeHtml(proposal.causalSummary) + '</div>' : '';
     const critiqueHtml = critique ? '<div class="investigation-note"><b>Critic</b> · ' + escapeHtml(critique.verdict) + '<br>' + escapeHtml(critique.summary) + '</div>' : '';
     $('investigation').innerHTML = gateHtml + proposalHtml + critiqueHtml + '<div class="investigation-grid"><div><h4>Agent Tasks</h4><ul>' + tasks + '</ul></div><div><h4>Agent Steps</h4><ul>' + steps + '</ul></div></div>';
+  };
+  const renderLoopInvestigation = detail => {
+    const run = detail.run;
+    const runHtml = run
+      ? '<div class="investigation-gate"><b>Main Agent Loop</b> | ' + escapeHtml(run.status) +
+        '<br><span>Baseline: ' + escapeHtml(run.baselineStatus) + '</span>' +
+        (run.restartReason ? '<br><small>Restart: ' + escapeHtml(run.restartReason) + '</small>' : '') + '</div>'
+      : '<div class="investigation-gate">Main Agent Loop is waiting to start.</div>';
+    const delegations = (detail.delegations || []).map(item => {
+      const evidence = item.evidenceIds.length ? '<div class="investigation-note">Evidence: ' +
+        escapeHtml(item.evidenceIds.join(', ')) + '</div>' : '';
+      const error = item.errorCode ? '<div class="investigation-note error">' + escapeHtml(item.errorCode) +
+        (item.errorMessage ? ': ' + escapeHtml(item.errorMessage) : '') + '</div>' : '';
+      return '<li><b>' + escapeHtml(item.agentType) + '</b><span>round ' + item.round + ' | ' +
+        escapeHtml(item.status) + '</span><p>' + escapeHtml(item.objective) + '</p>' + evidence + error + '</li>';
+    }).join('') || '<li>No specialist delegation has started.</li>';
+    const tasks = detail.tasks.map(task => '<li><b>' + escapeHtml(task.agentType) + '</b><span>round ' +
+      task.investigationRound + ' | ' + escapeHtml(task.status) + '</span><p>' + escapeHtml(task.objective) +
+      '</p></li>').join('') || '<li>No local specialist execution has been recorded.</li>';
+    $('investigation').innerHTML = runHtml + '<div class="investigation-grid"><div><h4>Delegations</h4><ul>' +
+      delegations + '</ul></div><div><h4>Specialist executions</h4><ul>' + tasks + '</ul></div></div>';
   };
   const renderAction = action => {
     if (!action) { $('action').textContent = 'None'; return; }
