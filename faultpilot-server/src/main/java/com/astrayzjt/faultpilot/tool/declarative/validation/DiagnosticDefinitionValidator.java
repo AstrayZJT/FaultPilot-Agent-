@@ -30,15 +30,7 @@ public final class DiagnosticDefinitionValidator {
     private static final Pattern DATA_PATH = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*|\\[[0-9]+])*");
     private static final Pattern THRESHOLD = Pattern.compile("observability\\.[a-zA-Z][a-zA-Z0-9]{1,127}");
     private static final Set<String> INPUT_TYPES = Set.of("object", "string", "integer", "number", "boolean");
-    private static final Set<String> SOURCES = Set.of(
-            "task.serviceName",
-            "task.endpointName",
-            "task.timeRange.start",
-            "task.timeRange.end",
-            "service.prometheusLabels",
-            "service.codePackagePrefixes",
-            "service.databaseRef",
-            "service.redisRef");
+    private static final Set<String> INPUT_SOURCES = Set.of("task.serviceName");
 
     public void validate(List<LoadedTool> loadedTools, List<LoadedSkill> loadedSkills,
                          Set<String> allowedEndpointRefs) {
@@ -148,7 +140,8 @@ public final class DiagnosticDefinitionValidator {
             require(INPUT_NAME.matcher(name).matches(), "Invalid input property: " + name, source);
             require(property != null && INPUT_TYPES.contains(property.type()),
                     "Invalid input type for " + name, source);
-            require(SOURCES.contains(property.source()), "Input source is not allowlisted: " + property.source(), source);
+            require(INPUT_SOURCES.contains(property.source()),
+                    "Input source is not supported by the current execution context: " + property.source(), source);
             require(property.maxLength() == null || property.maxLength() >= 1 && property.maxLength() <= 1024,
                     "Input maxLength must be between 1 and 1024", source);
         });
@@ -183,7 +176,8 @@ public final class DiagnosticDefinitionValidator {
             boolean hasValue = binding.value() != null;
             require(hasSource ^ hasValue, "A binding must define exactly one of source or value", source);
             if (hasSource) {
-                require(SOURCES.contains(binding.source()), "Binding source is not allowlisted: " + binding.source(), source);
+                require(INPUT_SOURCES.contains(binding.source()),
+                        "Binding source is not supported by the current execution context: " + binding.source(), source);
             } else {
                 require(binding.value() instanceof String || binding.value() instanceof Number
                                 || binding.value() instanceof Boolean,

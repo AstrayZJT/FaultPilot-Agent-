@@ -41,6 +41,24 @@ faultpilot:
       - postgres
       - redis
       - trace
+    http:
+      mode: ${FAULTPILOT_DECLARATIVE_EXECUTION_MODE:LOCAL}
+      endpoints:
+        prometheus:
+          base-url: ${PROMETHEUS_URL:http://localhost:9090}
+          bearer-token: ${PROMETHEUS_BEARER_TOKEN:}
+        arthas:
+          base-url: ${ARTHAS_GATEWAY_URL:}
+          bearer-token: ${ARTHAS_GATEWAY_TOKEN:}
+        postgres:
+          base-url: ${POSTGRES_DIAGNOSTIC_API_URL:}
+          bearer-token: ${POSTGRES_DIAGNOSTIC_API_TOKEN:}
+        redis:
+          base-url: ${REDIS_DIAGNOSTIC_API_URL:}
+          bearer-token: ${REDIS_DIAGNOSTIC_API_TOKEN:}
+        trace:
+          base-url: ${TRACE_DIAGNOSTIC_API_URL:}
+          bearer-token: ${TRACE_DIAGNOSTIC_API_TOKEN:}
   integration:
     mode: ${FAULTPILOT_INTEGRATION_MODE:LAB}
   agent:
