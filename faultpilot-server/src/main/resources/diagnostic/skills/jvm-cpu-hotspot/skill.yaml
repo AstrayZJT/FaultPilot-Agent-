@@ -1,0 +1,24 @@
+apiVersion: faultpilot/v1
+kind: DiagnosticSkill
+metadata:
+  name: jvm-cpu-hotspot
+  version: 1.0.0
+spec:
+  ownerAgent: JVM_AGENT
+  description: Confirm process CPU pressure and locate the responsible application method.
+  triggerEvidenceTypes:
+    - PROCESS_CPU_HIGH
+  producesEvidenceTypes:
+    - CPU_HOT_METHOD_FOUND
+  allowedTools:
+    - query_prometheus_process_cpu
+    - query_arthas_hot_threads
+  completion:
+    allOf:
+      - PROCESS_CPU_HIGH
+      - CPU_HOT_METHOD_FOUND
+    anyOf: []
+  limits:
+    maxSteps: 3
+    timeoutSeconds: 60
+  riskLevel: READ_ONLY

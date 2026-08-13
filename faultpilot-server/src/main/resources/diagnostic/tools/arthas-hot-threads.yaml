@@ -1,0 +1,38 @@
+apiVersion: faultpilot/v1
+kind: DiagnosticTool
+metadata:
+  name: query_arthas_hot_threads
+  version: 1.0.0
+spec:
+  ownerAgent: JVM_AGENT
+  description: Locate hot application threads through the bounded Arthas gateway.
+  endpoint:
+    ref: arthas
+    path: /diagnostics/hot-threads
+    method: POST
+  input:
+    type: object
+    required:
+      - serviceName
+    properties:
+      serviceName:
+        type: string
+        source: task.serviceName
+        maxLength: 128
+  request:
+    body:
+      serviceName:
+        source: task.serviceName
+  response:
+    resultPath: data.hotThreads
+    aggregation: COUNT
+    evidence:
+      rule: NON_EMPTY
+      trueType: CPU_HOT_METHOD_FOUND
+      trueSummary: Arthas identified a hot application method
+      sourceTemplate: arthas:{serviceName}:hot-threads
+  limits:
+    timeoutSeconds: 8
+    maxResponseBytes: 262144
+    maxItems: 50
+  riskLevel: READ_ONLY

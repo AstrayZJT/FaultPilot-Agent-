@@ -1,0 +1,44 @@
+apiVersion: faultpilot/v1
+kind: DiagnosticTool
+metadata:
+  name: query_prometheus_process_cpu
+  version: 1.0.0
+spec:
+  ownerAgent: JVM_AGENT
+  description: Query process CPU usage for the target service.
+  endpoint:
+    ref: prometheus
+    path: /api/v1/query
+    method: GET
+  input:
+    type: object
+    required:
+      - serviceName
+    properties:
+      serviceName:
+        type: string
+        source: task.serviceName
+        maxLength: 128
+  request:
+    prometheus:
+      metric: process_cpu_usage
+      selectorFrom: service.prometheusLabels
+      extraMatchers: []
+  response:
+    resultPath: data.result
+    valuePath: value[1]
+    aggregation: MAX
+    emptyStatus: DATA_UNAVAILABLE
+    evidence:
+      rule: THRESHOLD
+      thresholdFrom: observability.processCpuHighThreshold
+      trueType: PROCESS_CPU_HIGH
+      falseType: PROCESS_CPU_NORMAL
+      trueSummary: Process CPU usage is above the configured threshold
+      falseSummary: Process CPU usage is within normal range
+      sourceTemplate: prometheus:{serviceName}:process_cpu_usage
+  limits:
+    timeoutSeconds: 5
+    maxResponseBytes: 65536
+    maxItems: 20
+  riskLevel: READ_ONLY

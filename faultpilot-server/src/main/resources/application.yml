@@ -29,6 +29,18 @@ springdoc:
     path: /swagger-ui.html
 
 faultpilot:
+  declarative:
+    enabled: ${FAULTPILOT_DECLARATIVE_TOOLS_ENABLED:true}
+    tool-locations:
+      - classpath*:diagnostic/tools/*.yaml
+    skill-locations:
+      - classpath*:diagnostic/skills/*/skill.yaml
+    allowed-endpoint-refs:
+      - prometheus
+      - arthas
+      - postgres
+      - redis
+      - trace
   integration:
     mode: ${FAULTPILOT_INTEGRATION_MODE:LAB}
   agent:
