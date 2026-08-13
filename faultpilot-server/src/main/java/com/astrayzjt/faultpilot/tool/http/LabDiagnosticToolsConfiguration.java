@@ -62,7 +62,7 @@ public class LabDiagnosticToolsConfiguration {
                                 EvidenceType.DB_POOL_ACTIVE_AT_MAX, source);
                     }
                     return new ToolResult(true, "Database lab overview is normal", data,
-                            EvidenceType.THREAD_POOL_NORMAL, source);
+                            null, source);
                 });
     }
 

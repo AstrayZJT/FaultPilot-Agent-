@@ -157,12 +157,12 @@ public final class LoopJvmInvestigationExecutor implements JvmInvestigationExecu
     }
 
     private boolean completed(LoadedSkill skill, List<RemoteEvidenceView> evidence) {
-        Set<EvidenceType> types = evidence.stream().map(RemoteEvidenceView::evidenceType)
-                .collect(java.util.stream.Collectors.toSet());
         var completion = skill.definition().spec().completion();
-        boolean all = completion.allOf().isEmpty() || types.containsAll(completion.allOf());
+        boolean all = completion.allOf().isEmpty() || completion.allOf().stream()
+                .allMatch(required -> evidence.stream().anyMatch(item -> item.hasType(required)));
         boolean any = completion.anyOf().isEmpty()
-                || completion.anyOf().stream().anyMatch(types::contains);
+                || completion.anyOf().stream()
+                .anyMatch(required -> evidence.stream().anyMatch(item -> item.hasType(required)));
         return all && any;
     }
 
@@ -170,7 +170,8 @@ public final class LoopJvmInvestigationExecutor implements JvmInvestigationExecu
                                              Set<UUID> producedIds) {
         Set<EvidenceType> required = new LinkedHashSet<>(skill.definition().spec().completion().allOf());
         required.addAll(skill.definition().spec().completion().anyOf());
-        LinkedHashSet<UUID> result = evidence.stream().filter(item -> required.contains(item.evidenceType()))
+        LinkedHashSet<UUID> result = evidence.stream()
+                .filter(item -> required.stream().anyMatch(item::hasType))
                 .map(RemoteEvidenceView::evidenceId)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         result.addAll(producedIds);

@@ -63,9 +63,6 @@ public final class MainAgentDecisionGuard {
             throw new IllegalArgumentException("Main Agent referenced evidence outside the current Incident");
         }
         if (decision.action() == MainAgentAction.DELEGATE) {
-            if (decision.draft() != null) {
-                throw new IllegalArgumentException("DELEGATE must not include a diagnosis draft");
-            }
             if (decision.delegations().size() > MAX_PARALLEL_DELEGATIONS) {
                 throw new IllegalArgumentException("A Main Agent round may contain at most 3 delegations");
             }
@@ -96,7 +93,9 @@ public final class MainAgentDecisionGuard {
                     throw new IllegalArgumentException("Main Agent repeated an already executed delegation");
                 }
             }
-            return decision;
+            return decision.draft() == null ? decision
+                    : new MainAgentDecision(MainAgentAction.DELEGATE, decision.delegations(),
+                    decision.evidenceIds(), null, decision.reason());
         }
         if (decision.action() == MainAgentAction.COMPLETE) {
             DiagnosisDraft draft = decision.draft();
@@ -110,13 +109,14 @@ public final class MainAgentDecisionGuard {
                     || !availableEvidence.containsAll(draft.counterEvidenceIds())) {
                 throw new IllegalArgumentException("Diagnosis draft referenced evidence outside the current Incident");
             }
-            return normalizeDiagnosis(decision, context.evidence());
+            return normalizeDiagnosis(decision, context.evidence(), context);
         }
         return MainAgentDecision.inconclusive(decision.reason().isBlank()
                 ? "Main Agent could not establish a supported diagnosis" : decision.reason());
     }
 
-    private MainAgentDecision normalizeDiagnosis(MainAgentDecision decision, List<Evidence> evidence) {
+    private MainAgentDecision normalizeDiagnosis(MainAgentDecision decision, List<Evidence> evidence,
+                                                 MainAgentContext context) {
         DiagnosisDraft draft = decision.draft();
         EvidenceRule rule = evidenceRules.get(draft.primaryCause());
         if (rule == null) {
@@ -127,16 +127,18 @@ public final class MainAgentDecisionGuard {
         Set<com.astrayzjt.faultpilot.common.domain.EvidenceType> supportingTypes = draft.supportingEvidenceIds()
                 .stream().map(byId::get).filter(java.util.Objects::nonNull).map(Evidence::type)
                 .collect(java.util.stream.Collectors.toSet());
-        Set<com.astrayzjt.faultpilot.common.domain.EvidenceType> activeTypes = evidence.stream().map(Evidence::type)
-                .collect(java.util.stream.Collectors.toSet());
         if (supportingTypes.stream().noneMatch(rule.signals()::contains)) {
             return MainAgentDecision.inconclusive("Diagnosis did not cite a required primary signal");
         }
-        if (rule.counters().stream().anyMatch(activeTypes::contains)) {
+        if (containsRelevantCounter(rule, evidence, context)) {
             return MainAgentDecision.inconclusive("Active Evidence contradicts the proposed diagnosis");
         }
         boolean corroborated = rule.corroboration().stream().anyMatch(supportingTypes::contains);
         if (!corroborated) {
+            MainAgentDecision followUp = followUpForMissingCorroboration(decision, draft, rule, context);
+            if (followUp != null) {
+                return followUp;
+            }
             LinkedHashSet<com.astrayzjt.faultpilot.common.domain.EvidenceType> missing =
                     new LinkedHashSet<>(draft.missingEvidenceTypes());
             missing.addAll(rule.corroboration());
@@ -149,35 +151,111 @@ public final class MainAgentDecisionGuard {
         return decision;
     }
 
+    private MainAgentDecision followUpForMissingCorroboration(MainAgentDecision decision, DiagnosisDraft draft,
+                                                               EvidenceRule rule, MainAgentContext context) {
+        if (rule.corroboration().isEmpty()
+                || context.nextRound() >= context.maxRounds()
+                || context.delegations().size() >= context.maxDelegations()) {
+            return null;
+        }
+        try {
+            capabilities.requireAvailable(rule.owner());
+        } catch (IllegalArgumentException unavailable) {
+            return null;
+        }
+        boolean alreadyAttempted = context.delegations().stream()
+                .anyMatch(item -> item.agentType() == rule.owner()
+                        && item.status() != DelegationStatus.FAILED
+                        && item.status() != DelegationStatus.TIMED_OUT);
+        if (alreadyAttempted) {
+            return null;
+        }
+        String objective = switch (draft.primaryCause()) {
+            case JVM_THREAD_POOL_EXHAUSTED ->
+                    "Inspect JVM worker threads for application blocking frames and produce BLOCKING_TASK_FOUND with the method, source file, line number, and blocking operation.";
+            case JVM_CPU_HOTSPOT ->
+                    "Inspect JVM hot threads and produce CPU_HOT_METHOD_FOUND or REPEATED_RUNNABLE_STACK with the application method and source location.";
+            case DB_SLOW_QUERY ->
+                    "Correlate the slow SQL observation with incident latency using the configured read-only trace or execution-plan diagnostic.";
+            case DB_POOL_EXHAUSTED ->
+                    "Inspect database connection holders and identify a query or transaction holding connections for the incident window.";
+            case DEPENDENCY_TIMEOUT ->
+                    "Inspect downstream trace spans and identify the slow child operation associated with the incident.";
+            case REDIS_SERVER_LATENCY ->
+                    "Inspect Redis read-only slow-command or trace evidence to corroborate the observed command latency.";
+            case REDIS_CLIENT_POOL_EXHAUSTED ->
+                    "Inspect Redis server command latency and provide the normal-latency corroboration needed to isolate client-pool pressure.";
+            case UNKNOWN -> "Collect the missing corroborating diagnostic evidence for the proposed cause.";
+        };
+        return new MainAgentDecision(MainAgentAction.DELEGATE,
+                List.of(new SpecialistDelegation(rule.owner(), objective)), decision.evidenceIds(), null,
+                "Local Evidence policy requires corroboration before completion: " + rule.corroboration());
+    }
+
+    /**
+     * Evidence type names are shared across domains, so a normal observation
+     * from another Agent must not contradict the proposed cause. Prefer the
+     * persisted Agent identity and fall back to the tool name for legacy or
+     * baseline records that do not carry an Agent capability identity.
+     */
+    private boolean containsRelevantCounter(EvidenceRule rule, List<Evidence> evidence,
+                                             MainAgentContext context) {
+        return evidence.stream()
+                .filter(item -> rule.counters().contains(item.type()))
+                .anyMatch(item -> belongsToAgent(item, rule.owner(), context));
+    }
+
+    private boolean belongsToAgent(Evidence item, AgentType owner, MainAgentContext context) {
+        if (item.agentId() != null && !item.agentId().isBlank()) {
+            var capability = context.capabilities().agents().stream()
+                    .filter(candidate -> candidate.agentId().equals(item.agentId()))
+                    .findFirst();
+            if (capability.isPresent()) {
+                return capability.get().agentType() == owner;
+            }
+        }
+        String tool = item.toolId() == null ? "" : item.toolId().toLowerCase(java.util.Locale.ROOT);
+        return switch (owner) {
+            case JVM_AGENT -> tool.contains("jvm") || tool.contains("arthas")
+                    || tool.contains("thread_pool") || tool.contains("process_cpu")
+                    || tool.contains("hot_thread");
+            case DATABASE_AGENT -> tool.contains("database") || tool.contains("hikari")
+                    || tool.contains("postgres") || tool.contains("sql");
+            case CACHE_AGENT -> tool.contains("redis") || tool.contains("cache");
+            case DEPENDENCY_AGENT -> tool.contains("downstream") || tool.contains("dependency")
+                    || tool.contains("child_span");
+        };
+    }
+
     private Map<CauseCode, EvidenceRule> evidenceRules() {
         EnumMap<CauseCode, EvidenceRule> rules = new EnumMap<>(CauseCode.class);
-        rules.put(CauseCode.JVM_CPU_HOTSPOT, new EvidenceRule(
+        rules.put(CauseCode.JVM_CPU_HOTSPOT, new EvidenceRule(AgentType.JVM_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.PROCESS_CPU_HIGH),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REPEATED_RUNNABLE_STACK,
                         com.astrayzjt.faultpilot.common.domain.EvidenceType.CPU_HOT_METHOD_FOUND),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.PROCESS_CPU_NORMAL)));
-        rules.put(CauseCode.JVM_THREAD_POOL_EXHAUSTED, new EvidenceRule(
+        rules.put(CauseCode.JVM_THREAD_POOL_EXHAUSTED, new EvidenceRule(AgentType.JVM_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.THREAD_POOL_ACTIVE_AT_MAX,
                         com.astrayzjt.faultpilot.common.domain.EvidenceType.THREAD_POOL_QUEUE_GROWING),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.BLOCKING_TASK_FOUND),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.THREAD_POOL_NORMAL)));
-        rules.put(CauseCode.DB_SLOW_QUERY, new EvidenceRule(
+        rules.put(CauseCode.DB_SLOW_QUERY, new EvidenceRule(AgentType.DATABASE_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.SLOW_SQL_FOUND),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.API_AND_SQL_TIME_CORRELATED,
                         com.astrayzjt.faultpilot.common.domain.EvidenceType.ABNORMAL_EXECUTION_PLAN), Set.of()));
-        rules.put(CauseCode.DB_POOL_EXHAUSTED, new EvidenceRule(
+        rules.put(CauseCode.DB_POOL_EXHAUSTED, new EvidenceRule(AgentType.DATABASE_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.DB_POOL_PENDING_HIGH,
                         com.astrayzjt.faultpilot.common.domain.EvidenceType.DB_POOL_ACTIVE_AT_MAX),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.CONNECTION_HOLDING_QUERY_FOUND), Set.of()));
-        rules.put(CauseCode.DEPENDENCY_TIMEOUT, new EvidenceRule(
+        rules.put(CauseCode.DEPENDENCY_TIMEOUT, new EvidenceRule(AgentType.DEPENDENCY_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.DOWNSTREAM_LATENCY_HIGH),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.SLOW_CHILD_SPAN_FOUND), Set.of()));
-        rules.put(CauseCode.REDIS_SERVER_LATENCY, new EvidenceRule(
+        rules.put(CauseCode.REDIS_SERVER_LATENCY, new EvidenceRule(AgentType.CACHE_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_COMMAND_LATENCY_HIGH),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_SLOW_COMMAND_FOUND,
                         com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_TRACE_LATENCY_CORRELATED),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_COMMAND_LATENCY_NORMAL)));
-        rules.put(CauseCode.REDIS_CLIENT_POOL_EXHAUSTED, new EvidenceRule(
+        rules.put(CauseCode.REDIS_CLIENT_POOL_EXHAUSTED, new EvidenceRule(AgentType.CACHE_AGENT,
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_CLIENT_POOL_PENDING_HIGH),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_COMMAND_LATENCY_NORMAL),
                 Set.of(com.astrayzjt.faultpilot.common.domain.EvidenceType.REDIS_CLIENT_POOL_NORMAL)));
@@ -185,6 +263,7 @@ public final class MainAgentDecisionGuard {
     }
 
     private record EvidenceRule(
+            AgentType owner,
             Set<com.astrayzjt.faultpilot.common.domain.EvidenceType> signals,
             Set<com.astrayzjt.faultpilot.common.domain.EvidenceType> corroboration,
             Set<com.astrayzjt.faultpilot.common.domain.EvidenceType> counters) {

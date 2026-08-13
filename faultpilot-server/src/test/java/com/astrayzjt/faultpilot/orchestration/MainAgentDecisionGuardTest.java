@@ -47,6 +47,26 @@ class MainAgentDecisionGuardTest {
     }
 
     @Test
+    void stripsAnIrrelevantDiagnosisDraftFromAValidDelegation() {
+        Fixture fixture = fixture(List.of());
+        MainAgentDecision decision = new MainAgentDecision(MainAgentAction.DELEGATE,
+                List.of(new SpecialistDelegation(AgentType.JVM_AGENT,
+                        "Inspect JVM worker blocking behind executor saturation")),
+                List.of(fixture.evidence.evidenceId()),
+                new DiagnosisDraft(DiagnosisStatus.SUPPORTED, CauseCode.JVM_THREAD_POOL_EXHAUSTED,
+                        List.of(), List.of(fixture.evidence.evidenceId()), List.of(),
+                        List.of(EvidenceType.BLOCKING_TASK_FOUND), "Preliminary diagnosis"),
+                "Need source-level corroboration");
+
+        MainAgentDecision normalized = guard.validate(decision, fixture.context);
+
+        assertThat(normalized.action()).isEqualTo(MainAgentAction.DELEGATE);
+        assertThat(normalized.delegations()).isEqualTo(decision.delegations());
+        assertThat(normalized.evidenceIds()).isEqualTo(decision.evidenceIds());
+        assertThat(normalized.draft()).isNull();
+    }
+
+    @Test
     void rejectsUnavailableAgentDangerousObjectiveAndForeignEvidence() {
         Fixture fixture = fixture(List.of());
         assertThatThrownBy(() -> guard.validate(new MainAgentDecision(MainAgentAction.DELEGATE,
@@ -101,7 +121,7 @@ class MainAgentDecisionGuardTest {
     }
 
     @Test
-    void downgradesUnsupportedCompletionButAcceptsEvidenceBoundDraft() {
+    void requestsJvmCorroborationBeforeAcceptingAnUnsupportedCompletion() {
         Fixture fixture = fixture(List.of());
         MainAgentDecision unsupported = new MainAgentDecision(MainAgentAction.COMPLETE, List.of(), List.of(),
                 new DiagnosisDraft(DiagnosisStatus.CONFIRMED, CauseCode.JVM_CPU_HOTSPOT, List.of(),
@@ -115,18 +135,75 @@ class MainAgentDecisionGuardTest {
                         List.of(fixture.evidence.evidenceId()), List.of(), List.of(), "CPU hotspot is confirmed"),
                 "done");
         MainAgentDecision normalized = guard.validate(supported, fixture.context);
-        assertThat(normalized.action()).isEqualTo(MainAgentAction.COMPLETE);
-        assertThat(normalized.draft().status()).isEqualTo(DiagnosisStatus.SUPPORTED);
-        assertThat(normalized.draft().missingEvidenceTypes()).contains(EvidenceType.CPU_HOT_METHOD_FOUND,
-                EvidenceType.REPEATED_RUNNABLE_STACK);
+        assertThat(normalized.action()).isEqualTo(MainAgentAction.DELEGATE);
+        assertThat(normalized.delegations()).singleElement().satisfies(delegation -> {
+            assertThat(delegation.agentType()).isEqualTo(AgentType.JVM_AGENT);
+            assertThat(delegation.objective()).contains("CPU_HOT_METHOD_FOUND");
+        });
 
         MainAgentDecision modelSupported = new MainAgentDecision(MainAgentAction.COMPLETE, List.of(),
                 List.of(fixture.evidence.evidenceId()),
                 new DiagnosisDraft(DiagnosisStatus.SUPPORTED, CauseCode.JVM_CPU_HOTSPOT, List.of(),
                         List.of(fixture.evidence.evidenceId()), List.of(), List.of(), "CPU hotspot is supported"),
                 "done");
-        assertThat(guard.validate(modelSupported, fixture.context).draft().missingEvidenceTypes())
-                .contains(EvidenceType.CPU_HOT_METHOD_FOUND, EvidenceType.REPEATED_RUNNABLE_STACK);
+        assertThat(guard.validate(modelSupported, fixture.context).action()).isEqualTo(MainAgentAction.DELEGATE);
+    }
+
+    @Test
+    void ignoresNormalEvidenceProducedByAnotherAgentDomainAndRequestsJvmCorroboration() {
+        Fixture fixture = fixture(List.of());
+        Evidence saturated = evidence(fixture, "jvm-agent", "query_prometheus_thread_pool",
+                EvidenceType.THREAD_POOL_ACTIVE_AT_MAX, "JVM executor is saturated");
+        Evidence databaseNormal = evidence(fixture, "database-agent", "query_database_overview",
+                EvidenceType.THREAD_POOL_NORMAL, "Database overview is normal");
+        MainAgentContext context = contextWith(fixture, List.of(saturated, databaseNormal));
+        MainAgentDecision decision = completion(saturated, CauseCode.JVM_THREAD_POOL_EXHAUSTED);
+
+        MainAgentDecision result = guard.validate(decision, context);
+
+        assertThat(result.action()).isEqualTo(MainAgentAction.DELEGATE);
+        assertThat(result.delegations()).singleElement().satisfies(delegation -> {
+            assertThat(delegation.agentType()).isEqualTo(AgentType.JVM_AGENT);
+            assertThat(delegation.objective()).contains("BLOCKING_TASK_FOUND");
+        });
+    }
+
+    @Test
+    void rejectsNormalEvidenceProducedByTheProposedAgentDomain() {
+        Fixture fixture = fixture(List.of());
+        Evidence saturated = evidence(fixture, "jvm-agent", "query_prometheus_thread_pool",
+                EvidenceType.THREAD_POOL_ACTIVE_AT_MAX, "JVM executor is saturated");
+        Evidence jvmNormal = evidence(fixture, "jvm-agent", "query_prometheus_thread_pool",
+                EvidenceType.THREAD_POOL_NORMAL, "JVM executor is normal");
+        MainAgentContext context = contextWith(fixture, List.of(saturated, jvmNormal));
+        MainAgentDecision decision = completion(saturated, CauseCode.JVM_THREAD_POOL_EXHAUSTED);
+
+        MainAgentDecision result = guard.validate(decision, context);
+
+        assertThat(result.action()).isEqualTo(MainAgentAction.INCONCLUSIVE);
+        assertThat(result.reason()).contains("contradict");
+    }
+
+    private MainAgentDecision completion(Evidence supporting, CauseCode cause) {
+        return new MainAgentDecision(MainAgentAction.COMPLETE, List.of(), List.of(supporting.evidenceId()),
+                new DiagnosisDraft(DiagnosisStatus.CONFIRMED, cause, List.of(),
+                        List.of(supporting.evidenceId()), List.of(), List.of(), "Evidence supports the cause"),
+                "complete");
+    }
+
+    private MainAgentContext contextWith(Fixture fixture, List<Evidence> evidence) {
+        return new MainAgentContext(fixture.context.incident(), fixture.context.run(),
+                fixture.context.capabilities(), evidence, fixture.context.delegations(),
+                fixture.context.nextRound(), fixture.context.maxRounds(), fixture.context.maxDelegations(),
+                fixture.context.deadline());
+    }
+
+    private Evidence evidence(Fixture fixture, String agentId, String toolId, EvidenceType type, String summary) {
+        Instant now = Instant.now();
+        return new Evidence(UUID.randomUUID(), fixture.context.incident().incidentId(), null,
+                fixture.context.run().runId(), agentId, toolId, "test-tool-call", "test-1.0.0",
+                EvidenceStatus.ACTIVE, type, "test:" + toolId, "order-service", now.minusSeconds(1), now,
+                summary, null, UUID.randomUUID().toString(), java.util.Map.of(), now);
     }
 
     private Fixture fixture(List<AgentDelegation> delegations) {

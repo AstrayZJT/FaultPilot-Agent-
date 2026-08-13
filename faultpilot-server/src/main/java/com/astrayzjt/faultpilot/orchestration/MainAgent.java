@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -40,7 +41,16 @@ public final class MainAgent {
                 "a supported DiagnosisDraft citing only supplied Evidence IDs. Do not invent facts or IDs. Return " +
                 "JSON only: {action,delegations:[{agentType,objective}],evidenceIds,diagnosis,reason}. diagnosis fields are " +
                 "{status,primaryCause,contributingFactors,supportingEvidenceIds,counterEvidenceIds," +
-                "missingEvidenceTypes,summary}.";
+                "missingEvidenceTypes,summary}. Use exact enum values only: status=" +
+                "[CONFIRMED,SUPPORTED,INSUFFICIENT,CONTRADICTED,INCONCLUSIVE]; primaryCause=" +
+                "[JVM_CPU_HOTSPOT,JVM_THREAD_POOL_EXHAUSTED,DB_SLOW_QUERY,DB_POOL_EXHAUSTED," +
+                "DEPENDENCY_TIMEOUT,REDIS_SERVER_LATENCY,REDIS_CLIENT_POOL_EXHAUSTED,UNKNOWN]; " +
+                "contributingFactors must contain only those primaryCause enum values, and missingEvidenceTypes " +
+                "must contain only EvidenceType enum names. For JVM_THREAD_POOL_EXHAUSTED, do not COMPLETE " +
+                "until BLOCKING_TASK_FOUND is cited; for JVM_CPU_HOTSPOT, do not COMPLETE until " +
+                "CPU_HOT_METHOD_FOUND or REPEATED_RUNNABLE_STACK is cited. When a required corroborating " +
+                "Evidence type is missing and its Agent is available, choose DELEGATE with a source-level " +
+                "investigation objective. Never put an explanation sentence in an enum field.";
         String user = "runId=" + context.run().runId() +
                 "\nround=" + context.nextRound() +
                 "\nremainingRounds=" + context.remainingRounds() +
@@ -103,13 +113,107 @@ public final class MainAgent {
 
     private DiagnosisDraft parseDraft(JsonNode node) {
         return new DiagnosisDraft(
-                optionalEnum(node.path("status"), DiagnosisStatus.class),
-                optionalEnum(node.path("primaryCause"), CauseCode.class),
-                enumList(node.path("contributingFactors"), CauseCode.class),
+                parseDiagnosisStatus(node.path("status")),
+                parseCauseCode(node.path("primaryCause")),
+                parseCauseCodes(node.path("contributingFactors")),
                 uuidList(node.path("supportingEvidenceIds")),
                 uuidList(node.path("counterEvidenceIds")),
-                enumList(node.path("missingEvidenceTypes"), EvidenceType.class),
+                parseEvidenceTypes(node.path("missingEvidenceTypes")),
                 node.path("summary").asText(""));
+    }
+
+    private DiagnosisStatus parseDiagnosisStatus(JsonNode node) {
+        String value = normalized(node);
+        if (value.isBlank()) {
+            return null;
+        }
+        try {
+            return DiagnosisStatus.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return switch (value) {
+                case "ROOT_CAUSE_FOUND", "ROOT_CAUSE_IDENTIFIED", "VERIFIED", "ROOT_CAUSE_CONFIRMED" ->
+                        DiagnosisStatus.CONFIRMED;
+                case "INSUFFICIENT_EVIDENCE", "EVIDENCE_INSUFFICIENT" -> DiagnosisStatus.INSUFFICIENT;
+                default -> DiagnosisStatus.INCONCLUSIVE;
+            };
+        }
+    }
+
+    private CauseCode parseCauseCode(JsonNode node) {
+        String value = normalized(node);
+        if (value.isBlank()) {
+            return null;
+        }
+        try {
+            return CauseCode.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (lower.contains("thread") && (lower.contains("pool") || lower.contains("worker"))
+                    && (lower.contains("exhaust") || lower.contains("saturat") || lower.contains("block"))) {
+                return CauseCode.JVM_THREAD_POOL_EXHAUSTED;
+            }
+            if (lower.contains("cpu") || lower.contains("hotspot") || lower.contains("high cpu")) {
+                return CauseCode.JVM_CPU_HOTSPOT;
+            }
+            if ((lower.contains("connection") || lower.contains("hikari") || lower.contains("db"))
+                    && lower.contains("pool") && (lower.contains("exhaust") || lower.contains("saturat"))) {
+                return CauseCode.DB_POOL_EXHAUSTED;
+            }
+            if (lower.contains("slow") && (lower.contains("sql") || lower.contains("query")
+                    || lower.contains("database"))) {
+                return CauseCode.DB_SLOW_QUERY;
+            }
+            if (lower.contains("redis") && lower.contains("pool")) {
+                return CauseCode.REDIS_CLIENT_POOL_EXHAUSTED;
+            }
+            if (lower.contains("redis") && (lower.contains("latency") || lower.contains("slow"))) {
+                return CauseCode.REDIS_SERVER_LATENCY;
+            }
+            if (lower.contains("downstream") || lower.contains("dependency") || lower.contains("external")
+                    && lower.contains("timeout")) {
+                return CauseCode.DEPENDENCY_TIMEOUT;
+            }
+            return CauseCode.UNKNOWN;
+        }
+    }
+
+    private List<CauseCode> parseCauseCodes(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw new IllegalArgumentException("Cause values must be an array");
+        }
+        LinkedHashSet<CauseCode> values = new LinkedHashSet<>();
+        node.forEach(value -> {
+            CauseCode cause = parseCauseCode(value);
+            if (cause != null && cause != CauseCode.UNKNOWN) {
+                values.add(cause);
+            }
+        });
+        return List.copyOf(values);
+    }
+
+    private List<EvidenceType> parseEvidenceTypes(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw new IllegalArgumentException("Evidence type values must be an array");
+        }
+        LinkedHashSet<EvidenceType> values = new LinkedHashSet<>();
+        node.forEach(value -> {
+            String token = normalized(value);
+            if (token.isBlank()) {
+                return;
+            }
+            try {
+                values.add(EvidenceType.valueOf(token));
+            } catch (IllegalArgumentException ignored) {
+                // Unknown missing-evidence text is advisory; the local gate remains authoritative.
+            }
+        });
+        return List.copyOf(values);
     }
 
     private List<UUID> uuidList(JsonNode node) {
@@ -141,6 +245,11 @@ public final class MainAgent {
             return null;
         }
         return Enum.valueOf(type, node.asText().trim().toUpperCase(Locale.ROOT));
+    }
+
+    private String normalized(JsonNode node) {
+        return node == null || node.isMissingNode() || node.isNull()
+                ? "" : node.asText("").trim().toUpperCase(Locale.ROOT);
     }
 
     private String requiredText(JsonNode node, String name) {

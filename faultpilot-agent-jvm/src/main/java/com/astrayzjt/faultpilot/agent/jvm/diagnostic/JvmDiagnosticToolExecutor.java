@@ -195,11 +195,16 @@ public final class JvmDiagnosticToolExecutor {
     private Endpoint endpoint(String ref, String serviceName) {
         if ("arthas".equals(ref)) {
             JvmAgentProperties.ServiceTarget service = properties.requireService(serviceName);
-            if (blank(service.getArthasBaseUrl()) || blank(service.getArthasUsername())
-                    || blank(service.getArthasPassword()) || service.getCodePackagePrefixes().isEmpty()) {
+            if (blank(service.getArthasBaseUrl()) || service.getCodePackagePrefixes().isEmpty()) {
                 throw new IllegalArgumentException("Arthas or application package prefixes are not configured");
             }
             URI base = validateBase(URI.create(service.getArthasBaseUrl()), "arthas");
+            if (blank(service.getArthasUsername()) && blank(service.getArthasPassword())) {
+                return new Endpoint(base, null);
+            }
+            if (blank(service.getArthasUsername()) || blank(service.getArthasPassword())) {
+                throw new IllegalArgumentException("Arthas username and password must be configured together");
+            }
             String raw = service.getArthasUsername() + ":" + service.getArthasPassword();
             return new Endpoint(base, "Basic " + Base64.getEncoder()
                     .encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
@@ -308,11 +313,16 @@ public final class JvmDiagnosticToolExecutor {
 
     private List<JsonNode> collectThreads(JsonNode root, boolean waitingOnly) {
         List<JsonNode> target = new ArrayList<>();
-        List<JsonNode> primary = root.findValues(waitingOnly ? "threadInfo" : "busyThreads");
-        if (primary.isEmpty()) {
-            primary = root.findValues(waitingOnly ? "threads" : "threadInfo");
+        List<String> fields = waitingOnly
+                ? List.of("threadInfo", "busyThreads", "threads")
+                : List.of("busyThreads", "threadInfo", "threads");
+        for (String field : fields) {
+            List<JsonNode> values = root.findValues(field);
+            if (!values.isEmpty()) {
+                values.forEach(node -> collectThreadNodes(node, target));
+                break;
+            }
         }
-        primary.forEach(node -> collectThreadNodes(node, target));
         return target;
     }
 

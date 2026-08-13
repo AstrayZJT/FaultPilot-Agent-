@@ -63,7 +63,7 @@ public final class CentralEvidenceClient {
             if (receipt.evidenceId() == null || !"ACTIVE".equals(receipt.status())) {
                 throw new IllegalStateException("Central Evidence receipt is invalid");
             }
-            return new RemoteEvidenceView(receipt.evidenceId(), observation.evidenceType(), observation.source(),
+            return new RemoteEvidenceView(receipt.evidenceId(), observation.evidenceType().name(), observation.source(),
                     observation.summary(), observation.data(), task.incident().timeRange().start(),
                     task.incident().timeRange().end());
         } catch (IOException exception) {

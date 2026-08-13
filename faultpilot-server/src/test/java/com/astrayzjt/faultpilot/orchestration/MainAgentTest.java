@@ -104,4 +104,31 @@ class MainAgentTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("valid decision");
     }
+
+    @Test
+    void normalizesSemanticDiagnosisLabelsBeforeLocalEvidenceValidation() {
+        UUID supporting = UUID.randomUUID();
+
+        MainAgentDecision decision = agent.parse("""
+                {
+                  "action":"COMPLETE",
+                  "delegations":[],
+                  "evidenceIds":["%s"],
+                  "diagnosis":{
+                    "status":"ROOT_CAUSE_FOUND",
+                    "primaryCause":"Thread pool exhaustion in order-service caused by blocked worker threads",
+                    "contributingFactors":["Simulated blocked workers"],
+                    "supportingEvidenceIds":["%s"],
+                    "counterEvidenceIds":[],
+                    "missingEvidenceTypes":[],
+                    "summary":"The worker pool is saturated because application threads are blocked."
+                  },
+                  "reason":"Direct JVM evidence is sufficient"
+                }
+                """.formatted(supporting, supporting));
+
+        assertThat(decision.draft().status()).isEqualTo(DiagnosisStatus.CONFIRMED);
+        assertThat(decision.draft().primaryCause()).isEqualTo(CauseCode.JVM_THREAD_POOL_EXHAUSTED);
+        assertThat(decision.draft().contributingFactors()).isEmpty();
+    }
 }

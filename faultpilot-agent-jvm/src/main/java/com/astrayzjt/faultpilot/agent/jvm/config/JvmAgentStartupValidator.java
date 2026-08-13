@@ -58,6 +58,14 @@ public final class JvmAgentStartupValidator implements ApplicationRunner {
         if (target.getArthasBaseUrl() != null && !target.getArthasBaseUrl().isBlank()) {
             validateBaseUri(parse(target.getArthasBaseUrl(), "Arthas URL for " + serviceName),
                     "Arthas URL for " + serviceName, false);
+            boolean usernameConfigured = target.getArthasUsername() != null
+                    && !target.getArthasUsername().isBlank();
+            boolean passwordConfigured = target.getArthasPassword() != null
+                    && !target.getArthasPassword().isBlank();
+            if (usernameConfigured != passwordConfigured) {
+                throw new IllegalStateException("Arthas username and password for " + serviceName
+                        + " must be configured together");
+            }
         }
     }
 

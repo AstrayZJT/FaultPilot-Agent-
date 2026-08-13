@@ -100,7 +100,7 @@ class LoopJvmInvestigationExecutorTest {
                 Instant.now().minusSeconds(1), Instant.now());
         JvmTaskProgress progress = new JvmTaskProgress("jvm-cpu-hotspot", List.of(reserved),
                 List.of(priorEvidenceId), 1);
-        RemoteEvidenceView cpu = new RemoteEvidenceView(priorEvidenceId, EvidenceType.PROCESS_CPU_HIGH, "source",
+        RemoteEvidenceView cpu = new RemoteEvidenceView(priorEvidenceId, EvidenceType.PROCESS_CPU_HIGH.name(), "source",
                 "high", java.util.Map.of(), Instant.now().minusSeconds(60), Instant.now());
         when(fixture.evidenceClient.query(any(), any())).thenReturn(List.of(cpu));
         DiagnosticObservation hot = new DiagnosticObservation(true, "hot", java.util.Map.of(),
@@ -142,7 +142,7 @@ class LoopJvmInvestigationExecutorTest {
 
     private RemoteEvidenceView evidence(EvidenceType type) {
         Instant now = Instant.now();
-        return new RemoteEvidenceView(UUID.randomUUID(), type, "source", type.name(), java.util.Map.of(),
+        return new RemoteEvidenceView(UUID.randomUUID(), type.name(), "source", type.name(), java.util.Map.of(),
                 now.minusSeconds(60), now);
     }
 

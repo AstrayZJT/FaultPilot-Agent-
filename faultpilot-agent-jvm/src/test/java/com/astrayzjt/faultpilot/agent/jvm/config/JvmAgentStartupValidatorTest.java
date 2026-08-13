@@ -35,6 +35,15 @@ class JvmAgentStartupValidatorTest {
         invalidLabel.setServices(Map.of("order-service", service));
         assertThatThrownBy(() -> new JvmAgentStartupValidator(invalidLabel).run(null))
                 .hasMessageContaining("Prometheus label");
+
+        JvmAgentProperties partialArthasCredentials = validProperties();
+        JvmAgentProperties.ServiceTarget arthasService = new JvmAgentProperties.ServiceTarget();
+        arthasService.setPrometheusLabels(Map.of("job", "faultpilot-lab-order"));
+        arthasService.setArthasBaseUrl("http://localhost:8563");
+        arthasService.setArthasUsername("arthas");
+        partialArthasCredentials.setServices(Map.of("order-service", arthasService));
+        assertThatThrownBy(() -> new JvmAgentStartupValidator(partialArthasCredentials).run(null))
+                .hasMessageContaining("configured together");
     }
 
     private JvmAgentProperties validProperties() {

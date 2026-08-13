@@ -72,6 +72,7 @@ class JvmAgentEndToEndTest {
     private static final Map<String, UUID> EVIDENCE_IDS = new ConcurrentHashMap<>();
     private static final List<String> PROMQL = new CopyOnWriteArrayList<>();
     private static final List<String> ARTHAS_COMMANDS = new CopyOnWriteArrayList<>();
+    private static final UUID CROSS_DOMAIN_EVIDENCE_ID = UUID.randomUUID();
     private static HttpServer backend;
 
     @Autowired
@@ -175,7 +176,7 @@ class JvmAgentEndToEndTest {
         return new DelegationRequest(DelegationRequest.SCHEMA_VERSION, UUID.randomUUID(), "run:1:jvm:e2e", "1.0.0",
                 new DelegationRequest.IncidentContext(UUID.randomUUID(), UUID.randomUUID(), "order-service",
                         "order-service CPU is high", new TimeRange(now.minusSeconds(60), now)),
-                "Confirm the JVM CPU hotspot and source method", List.of(),
+                "Confirm the JVM CPU hotspot and source method", List.of(CROSS_DOMAIN_EVIDENCE_ID),
                 new DelegationRequest.Limits(4, now.plusSeconds(30)));
     }
 
@@ -209,6 +210,20 @@ class JvmAgentEndToEndTest {
         JsonNode request = JSON.readTree(exchange.getRequestBody());
         List<JsonNode> result = new ArrayList<>();
         for (JsonNode id : request.path("evidenceIds")) {
+            if (CROSS_DOMAIN_EVIDENCE_ID.toString().equals(id.asText())) {
+                result.add(JSON.readTree("""
+                        {
+                          "evidenceId":"%s",
+                          "evidenceType":"REDIS_COMMAND_LATENCY_NORMAL",
+                          "source":"prometheus:order-service:redis",
+                          "summary":"Redis latency is normal",
+                          "structuredData":{},
+                          "windowStart":"2026-08-13T00:00:00Z",
+                          "windowEnd":"2026-08-13T00:01:00Z"
+                        }
+                        """.formatted(CROSS_DOMAIN_EVIDENCE_ID)));
+                continue;
+            }
             EVIDENCE_WRITES.stream().filter(item -> EVIDENCE_IDS.get(item.path("toolCallId").asText())
                             .toString().equals(id.asText())).findFirst().ifPresent(result::add);
         }

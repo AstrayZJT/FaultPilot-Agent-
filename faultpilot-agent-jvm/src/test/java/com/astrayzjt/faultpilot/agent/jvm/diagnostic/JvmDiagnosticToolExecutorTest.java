@@ -65,7 +65,7 @@ class JvmDiagnosticToolExecutorTest {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             respond(exchange, 200, """
-                    {"state":"SUCCEEDED","body":{"results":[{"type":"thread","threadInfo":[
+                    {"state":"SUCCEEDED","body":{"results":[{"type":"thread","busyThreads":[
                       {"id":42,"name":"lab-blocked-1","state":"WAITING","stackTrace":[
                         {"className":"java.util.concurrent.locks.LockSupport","methodName":"park","fileName":"LockSupport.java","lineNumber":211},
                         {"className":"com.astrayzjt.faultpilot.lab.order.fault.FaultScenarioManager","methodName":"lambda$startBlockedTasks$9","fileName":"FaultScenarioManager.java","lineNumber":276}
@@ -91,6 +91,34 @@ class JvmDiagnosticToolExecutorTest {
                 .contains("FaultScenarioManager.java:276").contains("LockSupport.park");
         assertThat(result.data().get("blockingThreads").toString())
                 .contains("lab-blocked-1", "threadId=42", "FaultScenarioManager.java:276");
+    }
+
+    @Test
+    void supportsAnArthasEndpointWithoutAuthentication() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        start("/api", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            respond(exchange, 200, """
+                    {"state":"SUCCEEDED","body":{"results":[{"type":"thread","busyThreads":[
+                      {"id":43,"name":"lab-blocked-2","state":"WAITING","stackTrace":[
+                        {"className":"java.util.concurrent.locks.LockSupport","methodName":"park","fileName":"LockSupport.java","lineNumber":211},
+                        {"className":"com.astrayzjt.faultpilot.lab.order.fault.FaultScenarioManager","methodName":"lambda$startBlockedTasks$9","fileName":"FaultScenarioManager.java","lineNumber":276}
+                      ]}
+                    ]}]}}
+                    """);
+        });
+        JvmAgentProperties properties = properties();
+        JvmAgentProperties.ServiceTarget service = service();
+        service.setArthasBaseUrl(baseUrl());
+        properties.setServices(Map.of("order-service", service));
+        ToolDefinition tool = catalog().requireTool("query_arthas_waiting_threads");
+
+        DiagnosticObservation result = new JvmDiagnosticToolExecutor(properties, new ObjectMapper())
+                .execute(tool, task(), Instant.now().plusSeconds(5));
+
+        assertThat(authorization.get()).isNull();
+        assertThat(result.evidenceType()).isEqualTo(EvidenceType.BLOCKING_TASK_FOUND);
+        assertThat(result.summary()).contains("FaultScenarioManager.java:276", "LockSupport.park");
     }
 
     private JvmDiagnosticCatalog catalog() {
