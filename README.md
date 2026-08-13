@@ -4,7 +4,7 @@ FaultPilot is a Java 21 multi-agent incident diagnosis and safe remediation syst
 
 ## Current Stage
 
-The MVP implementation covers the design stages 0-7: reproducible fault labs, read-only diagnostic tools, real GLM-backed specialist agents, a LangGraph4j PostgreSQL checkpoint graph, evidence-based diagnosis, confirmation-gated lab remediation, evaluation records, reviewed runbook search, SSE replay, and a static operations console.
+The MVP implementation covers the design stages 0-7: reproducible fault labs, read-only diagnostic tools, real Qwen-backed specialist agents, a LangGraph4j PostgreSQL checkpoint graph, evidence-based diagnosis, confirmation-gated lab remediation, evaluation records, reviewed runbook search, SSE replay, and a static operations console.
 
 Modules:
 
@@ -18,13 +18,13 @@ Modules:
 - JDK 21 or newer, with `JAVA_HOME` pointing to that JDK
 - Maven 3.9 or newer recommended
 - Docker Desktop with Compose
-- GLM OpenAI-compatible API access for model-backed stages
+- Alibaba Bailian OpenAI-compatible API access for model-backed stages
 
-The application never reads a local model. Configure the real GLM endpoint and keep using the existing `QWEN_API_KEY` environment variable for the credential:
+The application never reads a local model. Configure the Alibaba Bailian OpenAI-compatible endpoint and keep using the existing `QWEN_API_KEY` environment variable for the credential:
 
 ```powershell
 $env:MODEL_BASE_URL = "https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-$env:MODEL_NAME = "glm-5"
+$env:MODEL_NAME = "qwen3.7-max"
 $env:QWEN_API_KEY = "<your-rotated-key>"
 $env:MODEL_TIMEOUT_SECONDS = "90"
 $env:FAULTPILOT_SECURITY_VIEWER_PASSWORD = "<viewer-password>"

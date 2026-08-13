@@ -112,7 +112,7 @@ faultpilot:
         max-rows: ${DATABASE_DIAGNOSTIC_MAX_ROWS:20}
   model:
     base-url: ${MODEL_BASE_URL:}
-    model-name: ${MODEL_NAME:glm-5}
+    model-name: ${MODEL_NAME:qwen3.7-max}
     api-key: ${QWEN_API_KEY:}
     temperature: ${MODEL_TEMPERATURE:0}
     timeout-seconds: ${MODEL_TIMEOUT_SECONDS:90}
