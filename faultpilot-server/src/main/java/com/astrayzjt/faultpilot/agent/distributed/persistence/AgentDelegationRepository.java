@@ -57,6 +57,12 @@ public class AgentDelegationRepository {
                 "ORDER BY round,id", runId);
     }
 
+    public void markRecoverableStale(UUID runId) {
+        jdbcTemplate.update("UPDATE agent_delegation SET status='STALE',completed_at=CURRENT_TIMESTAMP," +
+                "error_code='CAPABILITY_CHANGED',error_message='Agent capability changed during recovery'," +
+                "version=version+1 WHERE run_id=? AND status IN ('PENDING','SUBMITTED','RUNNING')", runId);
+    }
+
     public boolean transition(UUID delegationId, DelegationStatus expected, DelegationStatus target, long version,
                               String remoteTaskId, EvidenceReferenceArtifact artifact, String errorCode,
                               String errorMessage, Instant completedAt) {
