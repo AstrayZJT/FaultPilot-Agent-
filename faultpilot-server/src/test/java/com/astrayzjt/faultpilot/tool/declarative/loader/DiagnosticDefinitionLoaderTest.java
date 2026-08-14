@@ -32,7 +32,8 @@ class DiagnosticDefinitionLoaderTest {
                 .extracting("name")
                 .containsExactly("jvm-cpu-hotspot");
         assertThat(bundle.skills().require("jvm-cpu-hotspot").instructions())
-                .contains("## Investigation order");
+                .contains("## Investigation order")
+                .doesNotContain("apiVersion:");
         assertThat(bundle.tools().require("query_prometheus_process_cpu")
                 .spec().response().evidence().trueType()).isEqualTo(EvidenceType.PROCESS_CPU_HIGH);
 
@@ -73,7 +74,7 @@ class DiagnosticDefinitionLoaderTest {
     }
 
     @Test
-    void rejectsDuplicateDefinitionsAndMissingSkillInstructions() throws Exception {
+    void rejectsDuplicateDefinitionsAndMissingSkillFrontMatter() throws Exception {
         TestLayout layout = validLayout();
         Files.copy(layout.tool(), layout.tool().resolveSibling("duplicate.yaml"));
 
@@ -82,28 +83,26 @@ class DiagnosticDefinitionLoaderTest {
                 .hasMessageContaining("Duplicate tool");
 
         Files.delete(layout.tool().resolveSibling("duplicate.yaml"));
-        Files.delete(layout.instructions());
+        Files.writeString(layout.skill(), "# JVM CPU\n\nMissing front matter.\n");
         assertThatThrownBy(() -> loader().load(properties(layout)))
                 .isInstanceOf(DiagnosticDefinitionException.class)
-                .hasMessageContaining("Missing SKILL.md");
+                .hasMessageContaining("YAML front matter");
     }
 
     private TestLayout validLayout() throws Exception {
         Path tools = Files.createDirectories(tempDirectory.resolve("tools"));
         Path skill = Files.createDirectories(tempDirectory.resolve("skills/jvm-cpu"));
         Path tool = tools.resolve("cpu.yaml");
-        Path skillYaml = skill.resolve("skill.yaml");
-        Path instructions = skill.resolve("SKILL.md");
+        Path skillDocument = skill.resolve("SKILL.md");
         Files.writeString(tool, validToolYaml());
-        Files.writeString(skillYaml, validSkillYaml());
-        Files.writeString(instructions, "# JVM CPU\n\n## Goal\n\nConfirm the CPU signal with bounded tools.\n");
-        return new TestLayout(tool, skillYaml, instructions);
+        Files.writeString(skillDocument, validSkillDocument());
+        return new TestLayout(tool, skillDocument);
     }
 
     private DeclarativeToolProperties properties(TestLayout layout) {
         DeclarativeToolProperties properties = new DeclarativeToolProperties();
         properties.setToolLocations(List.of(filePattern(layout.tool().getParent(), "*.yaml")));
-        properties.setSkillLocations(List.of(filePattern(layout.skill().getParent().getParent(), "*/skill.yaml")));
+        properties.setSkillLocations(List.of(filePattern(layout.skill().getParent().getParent(), "*/SKILL.md")));
         properties.setAllowedEndpointRefs(Set.of("prometheus"));
         return properties;
     }
@@ -163,8 +162,9 @@ class DiagnosticDefinitionLoaderTest {
                 """;
     }
 
-    private String validSkillYaml() {
+    private String validSkillDocument() {
         return """
+                ---
                 apiVersion: faultpilot/v1
                 kind: DiagnosticSkill
                 metadata:
@@ -183,9 +183,16 @@ class DiagnosticDefinitionLoaderTest {
                     maxSteps: 2
                     timeoutSeconds: 30
                   riskLevel: READ_ONLY
+                ---
+
+                # JVM CPU
+
+                ## Goal
+
+                Confirm the CPU signal with bounded tools.
                 """;
     }
 
-    private record TestLayout(Path tool, Path skill, Path instructions) {
+    private record TestLayout(Path tool, Path skill) {
     }
 }

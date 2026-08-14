@@ -31,24 +31,42 @@ public final class JvmDiagnosticDefinitionLoader {
     public JvmDiagnosticCatalog load() {
         List<ToolDefinition> tools = resources("classpath*:diagnostic/tools/*.yaml").stream()
                 .map(resource -> read(resource, ToolDefinition.class)).toList();
-        List<LoadedSkill> skills = resources("classpath*:diagnostic/skills/*/skill.yaml").stream()
+        List<LoadedSkill> skills = resources("classpath*:diagnostic/skills/*/SKILL.md").stream()
                 .map(this::readSkill).toList();
         validate(tools, skills);
         return new JvmDiagnosticCatalog(tools, skills);
     }
 
     private LoadedSkill readSkill(Resource resource) {
-        SkillDefinition definition = read(resource, SkillDefinition.class);
         try {
-            Resource instructions = resource.createRelative("SKILL.md");
-            if (!instructions.exists()) {
-                throw new IllegalArgumentException("Missing SKILL.md next to " + description(resource));
-            }
-            return new LoadedSkill(definition, instructions.getContentAsString(StandardCharsets.UTF_8),
-                    description(resource));
+            String source = description(resource);
+            String content = resource.getContentAsString(StandardCharsets.UTF_8);
+            SkillDocument document = splitSkillDocument(content, source);
+            SkillDefinition definition = yamlMapper.readValue(document.frontMatter(), SkillDefinition.class);
+            return new LoadedSkill(definition, document.instructions(), source);
         } catch (IOException exception) {
-            throw new IllegalArgumentException("Cannot read JVM diagnostic Skill instructions", exception);
+            throw new IllegalArgumentException("Cannot parse JVM diagnostic SKILL.md " + description(resource),
+                    exception);
         }
+    }
+
+    private SkillDocument splitSkillDocument(String value, String source) {
+        String document = value.startsWith("\uFEFF") ? value.substring(1) : value;
+        document = document.replace("\r\n", "\n").replace('\r', '\n');
+        if (!document.startsWith("---\n")) {
+            throw new IllegalArgumentException("SKILL.md must start with YAML front matter: " + source);
+        }
+        int closing = document.indexOf("\n---\n", 4);
+        if (closing < 0) {
+            throw new IllegalArgumentException("SKILL.md has unterminated YAML front matter: " + source);
+        }
+        String frontMatter = document.substring(4, closing).trim();
+        String instructions = document.substring(closing + 5).strip();
+        if (frontMatter.isBlank() || instructions.isBlank()) {
+            throw new IllegalArgumentException(
+                    "SKILL.md requires non-empty front matter and instructions: " + source);
+        }
+        return new SkillDocument(frontMatter, instructions);
     }
 
     private <T> T read(Resource resource, Class<T> type) {
@@ -223,5 +241,8 @@ public final class JvmDiagnosticDefinitionLoader {
         } catch (IOException exception) {
             return resource.getDescription();
         }
+    }
+
+    private record SkillDocument(String frontMatter, String instructions) {
     }
 }

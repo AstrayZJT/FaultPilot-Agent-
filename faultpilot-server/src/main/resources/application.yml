@@ -39,7 +39,7 @@ faultpilot:
     tool-locations:
       - classpath*:diagnostic/tools/*.yaml
     skill-locations:
-      - classpath*:diagnostic/skills/*/skill.yaml
+      - classpath*:diagnostic/skills/*/SKILL.md
     allowed-endpoint-refs:
       - prometheus
       - arthas

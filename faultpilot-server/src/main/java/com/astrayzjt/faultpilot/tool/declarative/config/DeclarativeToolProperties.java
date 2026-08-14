@@ -11,7 +11,7 @@ public class DeclarativeToolProperties {
 
     private boolean enabled = true;
     private List<String> toolLocations = List.of("classpath*:diagnostic/tools/*.yaml");
-    private List<String> skillLocations = List.of("classpath*:diagnostic/skills/*/skill.yaml");
+    private List<String> skillLocations = List.of("classpath*:diagnostic/skills/*/SKILL.md");
     private Set<String> allowedEndpointRefs = new LinkedHashSet<>(
             Set.of("prometheus", "arthas", "postgres", "redis", "trace"));
 

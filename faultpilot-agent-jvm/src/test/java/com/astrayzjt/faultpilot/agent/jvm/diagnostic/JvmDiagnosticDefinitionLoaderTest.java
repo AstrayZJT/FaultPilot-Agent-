@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JvmDiagnosticDefinitionLoaderTest {
 
     @Test
-    void loadsImmutableJvmSkillAndToolCatalogFromYaml() {
+    void loadsImmutableJvmSkillFrontMatterAndToolCatalog() {
         var resolver = new PathMatchingResourcePatternResolver(new DefaultResourceLoader());
 
         JvmDiagnosticCatalog catalog = new JvmDiagnosticDefinitionLoader(resolver).load();
@@ -19,7 +19,9 @@ class JvmDiagnosticDefinitionLoaderTest {
         LoadedSkill cpu = catalog.requireSkill("jvm-cpu-hotspot");
         assertThat(catalog.toolSummaries(cpu)).extracting(ToolSummary::name)
                 .containsExactly("query_prometheus_process_cpu", "query_arthas_hot_threads");
-        assertThat(cpu.instructions()).contains("PROCESS_CPU_HIGH plus CPU_HOT_METHOD_FOUND");
+        assertThat(cpu.instructions())
+                .contains("PROCESS_CPU_HIGH plus CPU_HOT_METHOD_FOUND")
+                .doesNotContain("apiVersion:");
         assertThat(catalog.requireTool("query_arthas_waiting_threads").spec().riskLevel())
                 .isEqualTo("READ_ONLY");
     }

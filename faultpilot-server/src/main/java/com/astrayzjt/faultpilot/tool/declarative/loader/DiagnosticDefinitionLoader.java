@@ -63,11 +63,21 @@ public final class DiagnosticDefinitionLoader {
     List<LoadedSkill> loadSkills(List<String> locations) {
         List<LoadedSkill> loaded = new ArrayList<>();
         for (Resource resource : resolve(locations, "skill")) {
-            SkillDefinition definition = readYaml(resource, SkillDefinition.class);
-            Resource instructions = relative(resource, "SKILL.md");
-            loaded.add(new LoadedSkill(definition, readText(instructions), description(resource)));
+            loaded.add(readSkill(resource));
         }
         return List.copyOf(loaded);
+    }
+
+    private LoadedSkill readSkill(Resource resource) {
+        String source = description(resource);
+        SkillDocument document = splitSkillDocument(readText(resource), source);
+        try {
+            SkillDefinition definition = yamlMapper.readValue(document.frontMatter(), SkillDefinition.class);
+            return new LoadedSkill(definition, document.instructions(), source);
+        } catch (IOException | RuntimeException exception) {
+            throw new DiagnosticDefinitionException(
+                    "Cannot parse Skill front matter " + source + ": " + exception.getMessage(), exception);
+        }
     }
 
     private List<Resource> resolve(List<String> locations, String kind) {
@@ -111,18 +121,25 @@ public final class DiagnosticDefinitionLoader {
         }
     }
 
-    private Resource relative(Resource resource, String relativePath) {
-        try {
-            Resource target = resource.createRelative(relativePath);
-            if (!target.exists() || !target.isReadable()) {
-                throw new DiagnosticDefinitionException(
-                        "Missing " + relativePath + " next to " + description(resource));
-            }
-            return target;
-        } catch (IOException exception) {
+    private SkillDocument splitSkillDocument(String value, String source) {
+        String document = value.startsWith("\uFEFF") ? value.substring(1) : value;
+        document = document.replace("\r\n", "\n").replace('\r', '\n');
+        if (!document.startsWith("---\n")) {
             throw new DiagnosticDefinitionException(
-                    "Cannot resolve " + relativePath + " next to " + description(resource), exception);
+                    "SKILL.md must start with YAML front matter: " + source);
         }
+        int closing = document.indexOf("\n---\n", 4);
+        if (closing < 0) {
+            throw new DiagnosticDefinitionException(
+                    "SKILL.md has unterminated YAML front matter: " + source);
+        }
+        String frontMatter = document.substring(4, closing).trim();
+        String instructions = document.substring(closing + 5).strip();
+        if (frontMatter.isBlank() || instructions.isBlank()) {
+            throw new DiagnosticDefinitionException(
+                    "SKILL.md requires non-empty front matter and instructions: " + source);
+        }
+        return new SkillDocument(frontMatter, instructions);
     }
 
     private String description(Resource resource) {
@@ -142,5 +159,8 @@ public final class DiagnosticDefinitionLoader {
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
+    }
+
+    private record SkillDocument(String frontMatter, String instructions) {
     }
 }
