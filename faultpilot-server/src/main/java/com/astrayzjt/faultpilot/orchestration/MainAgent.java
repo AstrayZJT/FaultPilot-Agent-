@@ -37,8 +37,11 @@ public final class MainAgent {
                 "DELEGATE, COMPLETE, or INCONCLUSIVE. Treat the user symptom as a weak prior and prefer structured " +
                 "Evidence. DELEGATE may select one to three supplied specialist Agents for independent parallel " +
                 "investigations. Each delegation must provide a diagnostic objective, " +
-                "not a URL, credential, SQL statement, tool name, or shell/Arthas/Redis command. COMPLETE requires " +
-                "a supported DiagnosisDraft citing only supplied Evidence IDs. Do not invent facts or IDs. Return " +
+                "not a URL, credential, SQL statement, tool name, or shell/Arthas/Redis command. " +
+                "The Main Agent selects only the specialist Agent; the specialist owns Skill selection. Never " +
+                "return skillId, skillName, toolName, or any other internal routing field. " +
+                "COMPLETE requires a supported DiagnosisDraft citing only supplied Evidence IDs. " +
+                "Do not invent facts or IDs. Return " +
                 "JSON only: {action,delegations:[{agentType,objective}],evidenceIds,diagnosis,reason}. diagnosis fields are " +
                 "{status,primaryCause,contributingFactors,supportingEvidenceIds,counterEvidenceIds," +
                 "missingEvidenceTypes,summary}. Use exact enum values only: status=" +
@@ -96,6 +99,7 @@ public final class MainAgent {
         JsonNode nodes = root.path("delegations");
         if (nodes.isMissingNode() || nodes.isNull()) {
             if (root.hasNonNull("agentType") && root.hasNonNull("objective")) {
+                rejectInternalRoutingFields(root);
                 return List.of(new SpecialistDelegation(
                         optionalEnum(root.path("agentType"), AgentType.class),
                         root.path("objective").asText("")));
@@ -106,9 +110,21 @@ public final class MainAgent {
             throw new IllegalArgumentException("delegations must be an array");
         }
         List<SpecialistDelegation> result = new ArrayList<>();
-        nodes.forEach(node -> result.add(new SpecialistDelegation(
-                optionalEnum(node.path("agentType"), AgentType.class), node.path("objective").asText(""))));
+        nodes.forEach(node -> {
+            rejectInternalRoutingFields(node);
+            result.add(new SpecialistDelegation(
+                    optionalEnum(node.path("agentType"), AgentType.class), node.path("objective").asText("")));
+        });
         return List.copyOf(result);
+    }
+
+    private void rejectInternalRoutingFields(JsonNode node) {
+        List<String> forbidden = List.of("skillId", "skill_id", "skillName", "skill_name",
+                "toolName", "tool_name", "toolNames", "tool_names");
+        if (forbidden.stream().anyMatch(node::has)) {
+            throw new IllegalArgumentException(
+                    "Main Agent delegations may contain only agentType and objective routing fields");
+        }
     }
 
     private DiagnosisDraft parseDraft(JsonNode node) {

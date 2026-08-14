@@ -63,6 +63,24 @@ class MainAgentTest {
     }
 
     @Test
+    void rejectsSkillSelectionLeakingIntoMainAgentDelegation() {
+        assertThatThrownBy(() -> agent.parse("""
+                {
+                  "action":"DELEGATE",
+                  "delegations":[{
+                    "agentType":"JVM_AGENT",
+                    "objective":"Inspect JVM runtime pressure",
+                    "skillId":"jvm-cpu-hotspot"
+                  }],
+                  "evidenceIds":[],
+                  "reason":"JVM investigation is required"
+                }
+                """))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("valid decision");
+    }
+
+    @Test
     void parsesEvidenceBoundCompletionDraft() {
         UUID supporting = UUID.randomUUID();
         UUID counter = UUID.randomUUID();
